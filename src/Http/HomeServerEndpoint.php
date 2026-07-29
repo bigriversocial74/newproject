@@ -74,8 +74,17 @@ final class HomeServerEndpoint
     {
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
+        $membership = $container['database']->pdo()->prepare(
+            "SELECT account_id FROM account_users WHERE user_id=:user AND status='active'
+             AND role IN ('owner','administrator') ORDER BY account_id LIMIT 1"
+        );
+        $membership->execute(['user' => (int) $current['user']['id']]);
+        $accountId = (int) $membership->fetchColumn();
+        if ($accountId < 1) {
+            throw new RuntimeException('An active VP3 account owner or administrator membership is required.');
+        }
         return [
-            'account_id' => (int) $current['user']['account_id'],
+            'account_id' => $accountId,
             'user' => $current['user'],
             'session' => $current['session'],
         ];
@@ -91,7 +100,7 @@ final class HomeServerEndpoint
             $status = str_contains(strtolower($message), 'credential') ? 401 : 422;
             if (str_contains(strtolower($message), 'not found')) {
                 $status = 404;
-            } elseif (str_contains(strtolower($message), 'suspended') || str_contains(strtolower($message), 'revoked') || str_contains(strtolower($message), 'eligible')) {
+            } elseif (str_contains(strtolower($message), 'suspended') || str_contains(strtolower($message), 'revoked') || str_contains(strtolower($message), 'eligible') || str_contains(strtolower($message), 'membership')) {
                 $status = 403;
             }
             JsonResponse::send(['error' => ['code' => 'homeserver_request_rejected', 'message' => $message]], $status);
