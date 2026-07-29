@@ -1,3 +1,4 @@
 SOURCE migrations/20260728_phase2_auth_accounts.sql;
 SOURCE migrations/20260729_phase2_auth_accounts_quality.sql;
 SOURCE migrations/20260729_phase2_auth_accounts_completion.sql;
+SOURCE migrations/20260729_phase11b_identity_authentication_completion.sql;
