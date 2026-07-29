@@ -17,6 +17,7 @@ use Vp3\Auth\AuthPublicException;
 use Vp3\Auth\Mail\MailAdapterFactory;
 use Vp3\Auth\Mail\NullMailAdapter;
 use Vp3\Auth\Mail\SmtpMailAdapter;
+use Vp3\Http\SessionManager;
 use Vp3\Runtime\RuntimeConfigurationValidator;
 
 $failures = [];
@@ -76,6 +77,34 @@ try {
     $failures[] = 'Absolute session TTL shorter than inactivity TTL was accepted.';
 } catch (RuntimeException) {
     // Expected.
+}
+
+$session = new SessionManager(['name' => 'VP3P11BTEST', 'secure' => false]);
+try {
+    $session->start();
+    $session->setApplicationToken('opaque-browser-token');
+    if ($session->applicationToken() !== 'opaque-browser-token') {
+        $failures[] = 'PHP session shell did not retain the application session token.';
+    }
+    $csrfBeforeRotation = $session->csrfToken();
+    $session->assertCsrf($csrfBeforeRotation);
+    try {
+        $session->assertCsrf('invalid-csrf-token');
+        $failures[] = 'Invalid CSRF token was accepted.';
+    } catch (RuntimeException) {
+        // Expected.
+    }
+    $session->regenerate();
+    $csrfAfterRotation = $session->csrfToken();
+    if (hash_equals($csrfBeforeRotation, $csrfAfterRotation)) {
+        $failures[] = 'CSRF token was not replaced during PHP session rotation.';
+    }
+} catch (Throwable $exception) {
+    $failures[] = 'Session runtime failure: ' . $exception->getMessage();
+} finally {
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $session->destroy();
+    }
 }
 
 if ($failures !== []) {
