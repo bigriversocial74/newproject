@@ -23,6 +23,7 @@ jobs:
           fetch-depth: 0
       - name: Apply isolated update fixture
         run: |
+          # Create a fresh update job rather than replaying retained Phase 7 state.
           base64 -d .phase11a-update-isolation/payload.b64 | gzip -d > /tmp/phase11a-update-isolation.patch
           git apply --check /tmp/phase11a-update-isolation.patch
           git apply /tmp/phase11a-update-isolation.patch
