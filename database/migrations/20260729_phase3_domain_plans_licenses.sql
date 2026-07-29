@@ -279,28 +279,28 @@ INSERT IGNORE INTO plans (public_id, code, name, status, billing_interval, curre
 VALUES ('PLAN-VP3-STANDARD', 'standard', 'VP3 Standard', 'active', 'monthly', 'USD', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP());
 
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'storage_bytes', 'integer', CAST(10737418240 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'storage_bytes', 'integer', JSON_EXTRACT('10737418240', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'pod_installation_limit', 'integer', CAST(1 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'pod_installation_limit', 'integer', JSON_EXTRACT('1', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'homeserver_limit', 'integer', CAST(1 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'homeserver_limit', 'integer', JSON_EXTRACT('1', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'mcp_client_limit', 'integer', CAST(8 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'mcp_client_limit', 'integer', JSON_EXTRACT('8', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
 SELECT id, 'update_channel', 'string', JSON_QUOTE('stable'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'automatic_updates', 'boolean', CAST(TRUE AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'automatic_updates', 'boolean', JSON_EXTRACT('true', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'managed_security', 'boolean', CAST(TRUE AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'managed_security', 'boolean', JSON_EXTRACT('true', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'backup_retention_days', 'integer', CAST(30 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'backup_retention_days', 'integer', JSON_EXTRACT('30', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
 SELECT id, 'support_tier', 'string', JSON_QUOTE('standard'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'custom_domain_alias_limit', 'integer', CAST(3 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'custom_domain_alias_limit', 'integer', JSON_EXTRACT('3', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'pod_user_limit', 'integer', CAST(25 AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'pod_user_limit', 'integer', JSON_EXTRACT('25', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'api_access', 'boolean', CAST(TRUE AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'api_access', 'boolean', JSON_EXTRACT('true', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
 INSERT IGNORE INTO plan_entitlements (plan_id, entitlement_key, value_type, value_json, created_at, updated_at)
-SELECT id, 'security_update_access', 'boolean', CAST(TRUE AS JSON), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
+SELECT id, 'security_update_access', 'boolean', JSON_EXTRACT('true', '$'), UTC_TIMESTAMP(), UTC_TIMESTAMP() FROM plans WHERE code='standard';
