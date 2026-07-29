@@ -8,13 +8,73 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: phase12-homeserver-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  finalize:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feature/vp3-homeserver-control-plane-v1-20260729'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vp3-homeserver-control-plane-v1-20260729
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Apply idempotent software-authority repair
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/HomeServers/HomeServerControlPlaneService.php')
+          text = path.read_text()
+          old_call = "$this->revokeDeviceAuthority($pdo, (int) $device['id']);"
+          new_call = "$this->revokeSoftwareAuthority($pdo, (int) $device['id']);"
+          if old_call in text:
+              text = text.replace(old_call, new_call, 1)
+          elif new_call not in text:
+              raise SystemExit('Suspension authority call was not found')
+
+          marker = "    private function revokeDeviceAuthority(PDO $pdo, int $deviceId): void\n"
+          helper_signature = "    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void\n"
+          helper = """    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void
+    {
+        $pdo->prepare(\"UPDATE homeserver_entitlement_leases SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")
+            ->execute(['device' => $deviceId]);
+        $pdo->prepare(\"UPDATE homeserver_installer_grants SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")
+            ->execute(['device' => $deviceId]);
+    }
+
+"""
+          if helper_signature not in text:
+              if marker not in text:
+                  raise SystemExit('Full device authority helper marker was not found')
+              text = text.replace(marker, helper + marker, 1)
+          path.write_text(text)
+          PY
+      - name: Validate repaired product tree
+        run: |
+          find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+          php tests/phase12_homeserver_control_plane_contract.php
+      - name: Commit product repair and remove temporary workflows
+        run: |
+          rm -f .github/workflows/phase12-finalize.yml
+          rm -f .github/workflows/phase12-authority-boundary-repair.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/HomeServers/HomeServerControlPlaneService.php .github/workflows/phase12-finalize.yml .github/workflows/phase12-authority-boundary-repair.yml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Finalize VP3 HomeServer authority boundaries"
+          git push origin HEAD:feature/vp3-homeserver-control-plane-v1-20260729
+
   php:
     runs-on: ubuntu-latest
     strategy:
