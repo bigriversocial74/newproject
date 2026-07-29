@@ -7,6 +7,7 @@ $failures = [];
 
 $requiredFiles = [
     'database/migrations/20260729_phase11b_identity_authentication_completion.sql',
+    'database/migrations/20260729_phase11b_identity_authentication_integrity.sql',
     'src/Auth/AuthPublicException.php',
     'src/Auth/AuthAuditService.php',
     'src/Auth/DatabaseSessionService.php',
@@ -41,14 +42,24 @@ foreach (['inactivity_expires_at','absolute_expires_at','rotated_from_public_id'
         $failures[] = 'Phase 11B migration is missing: ' . $contract;
     }
 }
+$integrity = file_get_contents($root . '/database/migrations/20260729_phase11b_identity_authentication_integrity.sql');
+foreach (['MODIFY inactivity_expires_at DATETIME NOT NULL','MODIFY absolute_expires_at DATETIME NOT NULL','fk_auth_sessions_revoked_by_user','idx_email_verification_request','idx_password_reset_request'] as $contract) {
+    if (!is_string($integrity) || !str_contains($integrity, $contract)) {
+        $failures[] = 'Phase 11B integrity contract is missing: ' . $contract;
+    }
+}
 
 $installer = file_get_contents($root . '/database/vp3-single-install.sql');
-if (!is_string($installer) || !str_contains($installer, '20260729_phase11b_identity_authentication_completion.sql')) {
-    $failures[] = 'Cumulative installer does not include Phase 11B.';
+foreach (['20260729_phase11b_identity_authentication_completion.sql','20260729_phase11b_identity_authentication_integrity.sql'] as $migrationName) {
+    if (!is_string($installer) || !str_contains($installer, $migrationName)) {
+        $failures[] = 'Cumulative installer does not include: ' . $migrationName;
+    }
 }
 $phase2Installer = file_get_contents($root . '/database/phase2-auth-accounts-single-install.sql');
-if (!is_string($phase2Installer) || !str_contains($phase2Installer, '20260729_phase11b_identity_authentication_completion.sql')) {
-    $failures[] = 'Retained Phase 2 installer does not include the completed identity schema.';
+foreach (['20260729_phase11b_identity_authentication_completion.sql','20260729_phase11b_identity_authentication_integrity.sql'] as $migrationName) {
+    if (!is_string($phase2Installer) || !str_contains($phase2Installer, $migrationName)) {
+        $failures[] = 'Retained identity installer does not include: ' . $migrationName;
+    }
 }
 
 $config = file_get_contents($root . '/config/config-example.php');
@@ -59,7 +70,7 @@ foreach (['session_inactivity_ttl_seconds','session_absolute_ttl_seconds',"'mail
 }
 
 $authService = file_get_contents($root . '/src/Auth/AuthService.php');
-foreach (['login_attempt_limit','login_attempt_window_seconds','verification_ttl_seconds',"=== 'active'",'PDOException'] as $contract) {
+foreach (['login_attempt_limit','login_attempt_window_seconds','verification_ttl_seconds',"=== 'active'",'PDOException','verification_delivery_failed','mail_delivery_failed'] as $contract) {
     if (!is_string($authService) || !str_contains($authService, $contract)) {
         $failures[] = 'AuthService contract is missing: ' . $contract;
     }
@@ -82,6 +93,13 @@ $passwordChange = file_get_contents($root . '/src/Auth/PasswordChangeService.php
 foreach (['password_verify','password_change','currentSessionPublicId','auth.password_changed','auth.session.revoked'] as $contract) {
     if (!is_string($passwordChange) || !str_contains($passwordChange, $contract)) {
         $failures[] = 'Password-change revocation contract is missing: ' . $contract;
+    }
+}
+
+$accountSecurity = file_get_contents($root . '/src/Auth/AccountSecurityService.php');
+foreach (['invalidated_at','password_reset.completed','mail_delivery_failed','auth.session.revoked'] as $contract) {
+    if (!is_string($accountSecurity) || !str_contains($accountSecurity, $contract)) {
+        $failures[] = 'Account security contract is missing: ' . $contract;
     }
 }
 
