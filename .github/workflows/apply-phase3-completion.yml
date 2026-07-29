@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           cat .phase3-payload/part* | base64 --decode > /tmp/phase3-completion.tgz
           test "$(wc -c < /tmp/phase3-completion.tgz)" -eq 20613
-          echo '3598c29c5d8dcc998fe80910267cc8a07a614450754d5f7bef9b67f72aad9279  /tmp/phase3-completion.tgz' | sha256sum --check
+          echo '70494eeba295c0611b9e81bcb2b6b39dc59a24b3b4aa43b710227bfc8256332f  /tmp/phase3-completion.tgz' | sha256sum --check
           tar -tzf /tmp/phase3-completion.tgz
           tar -xzf /tmp/phase3-completion.tgz -C .
       - name: Commit completed Phase 3 implementation
