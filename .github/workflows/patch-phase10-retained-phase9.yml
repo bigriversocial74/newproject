@@ -1,0 +1,37 @@
+name: Patch Phase 10 Retained Phase 9
+
+on:
+  push:
+    branches:
+      - feature/vp3-phase-10-operations-readiness-20260729
+    paths:
+      - .github/workflows/patch-phase10-retained-phase9.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vp3-phase-10-operations-readiness-20260729
+      - name: Enforce inherited provider verification failures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Infrastructure/InfrastructureProviderService.php')
+          text = path.read_text()
+          needle = """                $result = $this->executeStage($pdo, $stage, $binding, $deploymentRow, $auth);\n                $hash = hash('sha256', $this->json($result));"""
+          replacement = """                $result = $this->executeStage($pdo, $stage, $binding, $deploymentRow, $auth);\n                if (in_array($stage, ['hosting_verify', 'dns_verify', 'certificate_verify'], true)\n                    && ($result['verified'] ?? false) !== true) {\n                    throw new RuntimeException('Infrastructure provider verification failed for stage: ' . $stage);\n                }\n                $hash = hash('sha256', $this->json($result));"""
+          if needle not in text:
+              raise SystemExit('Expected retained Phase 9 insertion point was not found.')
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
+          rm .github/workflows/patch-phase10-retained-phase9.yml
+          git config user.name "vp3-build-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/Infrastructure/InfrastructureProviderService.php .github/workflows/patch-phase10-retained-phase9.yml
+          git commit -m "Retain Phase 9 verification enforcement in Phase 10"
+          git push origin HEAD:feature/vp3-phase-10-operations-readiness-20260729
