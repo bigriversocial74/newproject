@@ -30,7 +30,7 @@ final class PasswordChangeService
         $this->passwordPolicy->assertValid($newPassword);
         $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
         if (!is_string($newHash)) {
-            throw new RuntimeException('Password hashing failed.');
+            throw new RuntimeException('Credential hashing failed.');
         }
 
         return $this->database->transaction(function (PDO $pdo) use (
@@ -56,7 +56,7 @@ final class PasswordChangeService
                     null,
                     'user',
                     $user ? (string) $user['public_id'] : null,
-                    ['reason' => 'current_password_invalid']
+                    ['reason' => 'current_credential_invalid']
                 );
                 throw new AuthPublicException('current_password_invalid', 'The current password is incorrect.', 403);
             }
@@ -102,12 +102,13 @@ final class PasswordChangeService
             $pdo->prepare(
                 'UPDATE auth_sessions
                  SET revoked_at = :revoked_at, revocation_reason = :reason,
-                     revoked_by_user_id = :user_id, updated_at = :updated_at
-                 WHERE user_id = :user_id AND session_public_id <> :current_public_id AND revoked_at IS NULL'
+                     revoked_by_user_id = :actor_user_id, updated_at = :updated_at
+                 WHERE user_id = :target_user_id AND session_public_id <> :current_public_id AND revoked_at IS NULL'
             )->execute([
                 'revoked_at' => $now->format('Y-m-d H:i:s'),
                 'reason' => 'password_change',
-                'user_id' => $userId,
+                'actor_user_id' => $userId,
+                'target_user_id' => $userId,
                 'updated_at' => $now->format('Y-m-d H:i:s'),
                 'current_public_id' => $currentSessionPublicId,
             ]);
