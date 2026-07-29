@@ -205,10 +205,21 @@ final class SoftwareUpdateService
             } catch (QueueLeaseLostException) {
                 return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
             } catch (Throwable $exception) {
-                $pdo->prepare(
-                    "UPDATE update_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-                )->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $step['id']]);
-                $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], (int) $step['id'], (string) $job['request_id'], $stage, 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
+                try {
+                    $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+                    $this->ownedTransaction($job, function (PDO $owned) use ($job, $step, $stage, $exception): void {
+                        $owned->prepare(
+                            "UPDATE update_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
+                        )->execute([
+                            'code' => substr($exception::class, 0, 100),
+                            'message' => substr($exception->getMessage(), 0, 1000),
+                            'id' => $step['id'],
+                        ]);
+                        $this->receipt($owned, (int) $job['account_id'], (int) $job['id'], (int) $step['id'], (string) $job['request_id'], $stage, 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
+                    });
+                } catch (QueueLeaseLostException) {
+                    return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+                }
                 return $this->failOrRollback($job, $target, $release, $exception);
             }
         }
@@ -272,6 +283,15 @@ final class SoftwareUpdateService
             return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
         }
         return ['job_id' => (int) $job['id'], 'status' => 'failed', 'error' => $exception->getMessage()];
+    }
+
+    /** @template T @param array<string,mixed> $job @param callable(PDO):T $callback @return T */
+    private function ownedTransaction(array $job, callable $callback): mixed
+    {
+        return $this->database->transaction(function (PDO $pdo) use ($job, $callback): mixed {
+            $this->queueLease->assertOwned($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+            return $callback($pdo);
+        });
     }
 
     /** @return array<string,mixed> */
