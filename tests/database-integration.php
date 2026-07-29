@@ -137,7 +137,7 @@ try {
     }
 
     foreach (['customer_owner','customer_admin','billing_manager','support_member','vp3_support','vp3_operations','vp3_admin','vp3_super_admin'] as $role) {
-        $allowed = $pdo->prepare('SELECT COUNT(*) FROM role_permissions WHERE role = :role');
+        $allowed = $pdo->prepare('SELECT COUNT(*) FROM auth_role_permissions WHERE role = :role');
         $allowed->execute(['role' => $role]);
         if ((int) $allowed->fetchColumn() < 1) {
             $failures[] = 'Missing permission seed for role: ' . $role;
