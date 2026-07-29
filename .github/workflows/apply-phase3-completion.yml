@@ -34,13 +34,13 @@ jobs:
           echo '70494eeba295c0611b9e81bcb2b6b39dc59a24b3b4aa43b710227bfc8256332f  /tmp/phase3-completion.tgz' | sha256sum --check
           tar -tzf /tmp/phase3-completion.tgz
           tar -xzf /tmp/phase3-completion.tgz -C .
+          git restore .github/workflows/phase3-domain-plans-licenses.yml
       - name: Commit completed Phase 3 implementation
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
-            .github/workflows/phase3-domain-plans-licenses.yml \
             bootstrap.php \
             database/migrations/20260729_phase3_domain_plans_licenses.sql \
             database/vp3-single-install.sql \
