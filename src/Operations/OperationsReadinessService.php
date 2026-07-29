@@ -194,10 +194,11 @@ final class OperationsReadinessService
         $blockers = 0;
         $warnings = 0;
         foreach ($checks as $check) {
+            $findingCount = max(1, (int) ($check['count'] ?? 1));
             if ($check['status'] === 'fail' && $check['severity'] === 'blocker') {
-                $blockers++;
+                $blockers += $findingCount;
             } elseif ($check['status'] !== 'pass') {
-                $warnings++;
+                $warnings += $findingCount;
             }
         }
         $score = max(0.0, 100.0 - ($blockers * 15.0) - ($warnings * 4.0));
