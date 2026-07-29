@@ -23,6 +23,7 @@ jobs:
           fetch-depth: 0
       - name: Apply PDO placeholder repair
         run: |
+          # Native PDO requires one named placeholder per bound value.
           base64 -d .phase11a-placeholder-fix/payload.b64 | gzip -d > /tmp/phase11a-placeholder-fix.patch
           git apply --check /tmp/phase11a-placeholder-fix.patch
           git apply /tmp/phase11a-placeholder-fix.patch
