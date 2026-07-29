@@ -27,6 +27,7 @@ jobs:
           fetch-depth: 0
       - name: Apply certification fixture repair
         run: |
+          # Exact incremental test correction; production code is unchanged.
           base64 -d .phase11a-test-fix/payload.b64 | gzip -d > /tmp/phase11a-test-fix.patch
           git apply --check /tmp/phase11a-test-fix.patch
           git apply /tmp/phase11a-test-fix.patch
