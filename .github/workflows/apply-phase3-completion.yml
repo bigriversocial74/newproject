@@ -1,6 +1,12 @@
 name: Apply Phase 3 Completion
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.phase3-payload/**'
+      - '.github/workflows/apply-phase3-completion.yml'
   push:
     branches:
       - feature/vp3-phase-3-domain-plans-licenses-20260729
@@ -13,6 +19,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
