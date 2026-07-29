@@ -5,3 +5,4 @@ SOURCE migrations/20260729_phase3_domain_plans_licenses.sql;
 SOURCE migrations/20260729_phase4_stripe_billing.sql;
 SOURCE migrations/20260729_phase5_pod_provisioning.sql;
 SOURCE migrations/20260729_phase6_homeserver_registry.sql;
+SOURCE migrations/20260729_phase7_releases_updates.sql;
