@@ -8,6 +8,7 @@ use Vp3\Auth\AuthAuditService;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\DatabaseSessionService;
 use Vp3\Auth\Mail\MailAdapterFactory;
+use Vp3\Auth\PasswordChangeService;
 use Vp3\Auth\PasswordPolicy;
 use Vp3\Backups\BackupMetadataCipher;
 use Vp3\Backups\BackupService;
@@ -86,6 +87,7 @@ $databaseSessions = new DatabaseSessionService(
     $authAudit
 );
 $authenticationContext = new AuthenticationContext($session, $databaseSessions);
+$passwordChanges = new PasswordChangeService($database, $passwordPolicy, $authAudit);
 $auth = new AuthService($database, $passwordPolicy, $mailAdapter, $authConfig, $authAudit);
 $accountSecurity = new AccountSecurityService($database, $passwordPolicy, $mailAdapter, $authConfig, $authAudit);
 $planCatalog = new PlanCatalogService($database);
@@ -183,6 +185,7 @@ return [
     'account_security' => $accountSecurity,
     'database_sessions' => $databaseSessions,
     'authentication_context' => $authenticationContext,
+    'password_changes' => $passwordChanges,
     'plan_catalog' => $planCatalog,
     'subscription_lifecycle' => $subscriptionLifecycle,
     'domain_registry' => $domainRegistry,
