@@ -1,8 +1,21 @@
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
-ALTER TABLE subscriptions
-    ADD COLUMN IF NOT EXISTS provider_status VARCHAR(40) NULL AFTER status;
+SET @vp3_phase4_has_provider_status = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'subscriptions'
+      AND COLUMN_NAME = 'provider_status'
+);
+SET @vp3_phase4_provider_status_sql = IF(
+    @vp3_phase4_has_provider_status = 0,
+    'ALTER TABLE subscriptions ADD COLUMN provider_status VARCHAR(40) NULL AFTER status',
+    'SELECT 1'
+);
+PREPARE vp3_phase4_provider_status_statement FROM @vp3_phase4_provider_status_sql;
+EXECUTE vp3_phase4_provider_status_statement;
+DEALLOCATE PREPARE vp3_phase4_provider_status_statement;
 
 CREATE TABLE IF NOT EXISTS stripe_customers (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
