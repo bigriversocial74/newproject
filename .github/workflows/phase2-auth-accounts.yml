@@ -31,6 +31,8 @@ jobs:
           grep -q 'SOURCE migrations/20260728_phase2_auth_accounts.sql' database/phase2-auth-accounts-single-install.sql
           grep -q 'SOURCE migrations/20260729_phase2_auth_accounts_quality.sql' database/phase2-auth-accounts-single-install.sql
           grep -q 'SOURCE migrations/20260729_phase2_auth_accounts_completion.sql' database/phase2-auth-accounts-single-install.sql
+          grep -q 'SOURCE migrations/20260729_phase11b_identity_authentication_completion.sql' database/phase2-auth-accounts-single-install.sql
+          grep -q 'SOURCE migrations/20260729_phase11b_identity_authentication_integrity.sql' database/phase2-auth-accounts-single-install.sql
 
   mysql8:
     runs-on: ubuntu-latest
@@ -56,8 +58,11 @@ jobs:
           coverage: none
       - name: Install MySQL client
         run: sudo apt-get update && sudo apt-get install -y default-mysql-client
-      - name: Import cumulative Phase 2 schema
-        run: mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260728_phase2_auth_accounts.sql && mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_quality.sql && mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_completion.sql
+      - name: Import cumulative Phase 2 identity schema twice
+        working-directory: database
+        run: |
+          mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
+          mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
       - name: Run MySQL 8 integration certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
@@ -89,8 +94,11 @@ jobs:
           coverage: none
       - name: Install MariaDB client
         run: sudo apt-get update && sudo apt-get install -y mariadb-client
-      - name: Import cumulative Phase 2 schema
-        run: mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260728_phase2_auth_accounts.sql && mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_quality.sql && mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_completion.sql
+      - name: Import cumulative Phase 2 identity schema twice
+        working-directory: database
+        run: |
+          mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
+          mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
       - name: Run MariaDB 10.11 integration certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
