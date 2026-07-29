@@ -1,0 +1,64 @@
+name: Repair Phase 12 Software Authority Boundary
+
+on:
+  push:
+    branches:
+      - feature/vp3-homeserver-control-plane-v1-20260729
+    paths:
+      - .github/workflows/phase12-authority-boundary-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vp3-homeserver-control-plane-v1-20260729
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Separate suspension from provider pairing revocation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/HomeServers/HomeServerControlPlaneService.php')
+          text = path.read_text()
+          old_call = "$this->revokeDeviceAuthority($pdo, (int) $device['id']);"
+          new_call = "$this->revokeSoftwareAuthority($pdo, (int) $device['id']);"
+          if old_call not in text:
+              raise SystemExit('Suspension authority call was not found')
+          text = text.replace(old_call, new_call, 1)
+          marker = "    private function revokeDeviceAuthority(PDO $pdo, int $deviceId): void\n"
+          helper = """    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void
+    {
+        $pdo->prepare(\"UPDATE homeserver_entitlement_leases SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")
+            ->execute(['device' => $deviceId]);
+        $pdo->prepare(\"UPDATE homeserver_installer_grants SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")
+            ->execute(['device' => $deviceId]);
+    }
+
+"""
+          if marker not in text:
+              raise SystemExit('Full device authority helper marker was not found')
+          text = text.replace(marker, helper + marker, 1)
+          path.write_text(text)
+          PY
+      - name: Validate authority boundary repair
+        run: |
+          find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+          php tests/phase12_homeserver_control_plane_contract.php
+          grep -F 'revokeSoftwareAuthority($pdo' src/HomeServers/HomeServerControlPlaneService.php
+      - name: Remove one-time workflow and commit
+        run: |
+          rm .github/workflows/phase12-authority-boundary-repair.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/HomeServers/HomeServerControlPlaneService.php .github/workflows/phase12-authority-boundary-repair.yml
+          git commit -m "Preserve provider pairings during VP3 suspension"
+          git push origin HEAD:feature/vp3-homeserver-control-plane-v1-20260729
