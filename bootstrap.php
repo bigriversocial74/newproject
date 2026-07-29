@@ -5,6 +5,9 @@ declare(strict_types=1);
 use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\PasswordPolicy;
+use Vp3\Backups\BackupMetadataCipher;
+use Vp3\Backups\BackupService;
+use Vp3\Backups\NullBackupProviderAdapter;
 use Vp3\Billing\BillingGraceService;
 use Vp3\Billing\StripeApiClient;
 use Vp3\Billing\StripeCatalogService;
@@ -79,6 +82,18 @@ $releaseManifestSigner = new ReleaseManifestSigner(
 $releaseCatalog = new ReleaseCatalogService($database, $releaseManifestSigner);
 $softwareUpdateAdapter = new NullSoftwareUpdateAdapter();
 $softwareUpdates = new SoftwareUpdateService($database, $softwareUpdateAdapter);
+$backupProviderAdapter = new NullBackupProviderAdapter();
+$backupMetadataCipher = new BackupMetadataCipher(
+    (string) $config['backups']['metadata_encryption_key_base64'],
+    (string) $config['backups']['metadata_encryption_key_id']
+);
+$backups = new BackupService(
+    $database,
+    $backupProviderAdapter,
+    $backupMetadataCipher,
+    (float) $config['backups']['warning_threshold_percent'],
+    (float) $config['backups']['critical_threshold_percent']
+);
 $session = new SessionManager(['name' => (string) $config['app']['session_name'], 'secure' => (bool) $config['app']['session_secure']]);
 
 return [
@@ -106,5 +121,8 @@ return [
     'release_catalog' => $releaseCatalog,
     'software_update_adapter' => $softwareUpdateAdapter,
     'software_updates' => $softwareUpdates,
+    'backup_provider_adapter' => $backupProviderAdapter,
+    'backup_metadata_cipher' => $backupMetadataCipher,
+    'backups' => $backups,
     'session' => $session,
 ];

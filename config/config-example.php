@@ -54,4 +54,11 @@ return [
         'signing_key_id' => getenv('RELEASE_SIGNING_KEY_ID') ?: 'release-ed25519-v1',
         'update_provider_driver' => getenv('VP3_UPDATE_PROVIDER_DRIVER') ?: 'null',
     ],
+    'backups' => [
+        'metadata_encryption_key_base64' => getenv('BACKUP_METADATA_ENCRYPTION_KEY_B64') ?: '',
+        'metadata_encryption_key_id' => getenv('BACKUP_METADATA_ENCRYPTION_KEY_ID') ?: 'backup-aes256gcm-v1',
+        'provider_driver' => getenv('VP3_BACKUP_PROVIDER_DRIVER') ?: 'null',
+        'warning_threshold_percent' => min(100.0, max(1.0, (float) (getenv('STORAGE_WARNING_THRESHOLD_PERCENT') ?: 80))),
+        'critical_threshold_percent' => min(100.0, max(1.0, (float) (getenv('STORAGE_CRITICAL_THRESHOLD_PERCENT') ?: 95))),
+    ],
 ];
