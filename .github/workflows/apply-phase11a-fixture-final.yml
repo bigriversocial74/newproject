@@ -27,6 +27,7 @@ jobs:
           fetch-depth: 0
       - name: Apply final fixture cleanup
         run: |
+          # Remove retained success evidence before replay and restore the POD fixture to an allowed infrastructure state.
           base64 -d .phase11a-fixture-final/payload.b64 | gzip -d > /tmp/phase11a-fixture-final.patch
           git apply --check /tmp/phase11a-fixture-final.patch
           git apply /tmp/phase11a-fixture-final.patch
