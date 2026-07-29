@@ -61,6 +61,7 @@ foreach (['FOR UPDATE SKIP LOCKED', 'event_status', 'monitor_managed', 'appendWi
     $assert(str_contains($combined, $contract), 'Missing Phase 10 reliability contract: ' . $contract);
 }
 $assert(str_contains($notificationService, "'status' => (string) \$notification['event_status']"), 'Notification payload does not use immutable queued event status.');
+$assert(str_contains($notificationService, "locked_at<DATE_SUB(UTC_TIMESTAMP(),INTERVAL 15 MINUTE)"), 'Stale notification claims are not recovered.');
 $infrastructureService = file_get_contents($root . '/src/Infrastructure/InfrastructureProviderService.php') ?: '';
 $assert(str_contains($infrastructureService, 'Infrastructure provider verification failed for stage:'), 'Retained Phase 9 provider verification enforcement is missing.');
 
