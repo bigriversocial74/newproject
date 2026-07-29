@@ -357,6 +357,10 @@ final class InfrastructureProviderService
                 $pdo->prepare("UPDATE provider_operation_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
                     ->execute(['id' => $step['id']]);
                 $result = $this->executeStage($pdo, $stage, $binding, $deploymentRow, $auth);
+                if (in_array($stage, ['hosting_verify', 'dns_verify', 'certificate_verify'], true)
+                    && ($result['verified'] ?? false) !== true) {
+                    throw new RuntimeException('Infrastructure provider verification failed for stage: ' . $stage);
+                }
                 $hash = hash('sha256', $this->json($result));
                 $pdo->prepare("UPDATE provider_operation_steps SET status='completed',receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
                     ->execute(['hash' => $hash, 'id' => $step['id']]);
