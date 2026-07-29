@@ -11,6 +11,7 @@ $requiredFiles = [
     'src/Auth/AuthAuditService.php',
     'src/Auth/DatabaseSessionService.php',
     'src/Auth/AuthenticationContext.php',
+    'src/Auth/PasswordChangeService.php',
     'src/Auth/Mail/MailAdapter.php',
     'src/Auth/Mail/NullMailAdapter.php',
     'src/Auth/Mail/SmtpMailAdapter.php',
@@ -24,6 +25,7 @@ $requiredFiles = [
     'public/api/auth/revoke-session.php',
     'public/api/auth/rotate-session.php',
     'public/api/auth/resend-verification.php',
+    'public/api/auth/change-password.php',
     'tests/phase11b_database_integration.php',
     'docs/vp3-platform-backend/06-PHASE-11B-IDENTITY-AUTHENTICATION.md',
 ];
@@ -67,13 +69,20 @@ if (is_string($authService) && (str_contains($authService, "modify('+24 hours')"
 }
 
 $sessionService = file_get_contents($root . '/src/Auth/DatabaseSessionService.php');
-foreach (['hashToken($token)','inactivity_expires_at','absolute_expires_at','binding_mismatch','revoked_at IS NULL','rowCount() !== 1'] as $contract) {
+foreach (['hashToken($token)','inactivity_expires_at','absolute_expires_at','binding_mismatch','revoked_at IS NULL','rowCount() !== 1','auth.logout','auth.logout_all','auth.logout_others'] as $contract) {
     if (!is_string($sessionService) || !str_contains($sessionService, $contract)) {
         $failures[] = 'Database session contract is missing: ' . $contract;
     }
 }
 if (is_string($sessionService) && str_contains($sessionService, "'session_hash' => $token")) {
     $failures[] = 'Database session service stores a plaintext session token.';
+}
+
+$passwordChange = file_get_contents($root . '/src/Auth/PasswordChangeService.php');
+foreach (['password_verify','password_change','currentSessionPublicId','auth.password_changed','auth.session.revoked'] as $contract) {
+    if (!is_string($passwordChange) || !str_contains($passwordChange, $contract)) {
+        $failures[] = 'Password-change revocation contract is missing: ' . $contract;
+    }
 }
 
 $smtp = file_get_contents($root . '/src/Auth/Mail/SmtpMailAdapter.php');
@@ -83,7 +92,7 @@ foreach (['verify_peer','verify_peer_name','allow_self_signed','STARTTLS','asser
     }
 }
 
-foreach (['public/api/auth/logout.php','public/api/auth/logout-all.php','public/api/auth/logout-others.php','public/api/auth/revoke-session.php','public/api/auth/rotate-session.php'] as $path) {
+foreach (['public/api/auth/logout.php','public/api/auth/logout-all.php','public/api/auth/logout-others.php','public/api/auth/revoke-session.php','public/api/auth/rotate-session.php','public/api/auth/change-password.php'] as $path) {
     $source = file_get_contents($root . '/' . $path);
     if (!is_string($source) || !str_contains($source, 'assertCsrf')) {
         $failures[] = 'Cookie-authenticated mutation lacks CSRF enforcement: ' . $path;
