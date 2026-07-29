@@ -33,7 +33,7 @@ jobs:
           path = Path('src/HomeServers/HomeServerRegistryService.php')
           text = path.read_text()
           old = "SELECT id,public_id FROM homeserver_devices WHERE license_id=:license OR device_fingerprint=:fingerprint LIMIT 1 FOR UPDATE"
-          new = "SELECT id,public_id FROM homeserver_devices WHERE (license_id=:license OR device_fingerprint=:fingerprint) AND status<>'revoked' LIMIT 1 FOR UPDATE"
+          new = r"SELECT id,public_id FROM homeserver_devices WHERE (license_id=:license OR device_fingerprint=:fingerprint) AND status<>\'revoked\' LIMIT 1 FOR UPDATE"
           if old not in text and new not in text:
               raise SystemExit('Expected HomeServer registry query was not found')
           path.write_text(text.replace(old, new))
