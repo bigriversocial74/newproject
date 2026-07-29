@@ -21,6 +21,28 @@ final class RuntimeConfigurationValidator
             throw new RuntimeException('VP3_QUEUE_LEASE_SECONDS must be between 30 and 3600.');
         }
 
+        $auth = (array) ($config['auth'] ?? []);
+        $inactivityTtl = (int) ($auth['session_inactivity_ttl_seconds'] ?? 0);
+        $absoluteTtl = (int) ($auth['session_absolute_ttl_seconds'] ?? 0);
+        if ($inactivityTtl < 300) {
+            throw new RuntimeException('AUTH_SESSION_INACTIVITY_TTL_SECONDS must be at least 300.');
+        }
+        if ($absoluteTtl < $inactivityTtl) {
+            throw new RuntimeException('AUTH_SESSION_ABSOLUTE_TTL_SECONDS must be greater than or equal to the inactivity TTL.');
+        }
+        if ((int) ($auth['login_attempt_limit'] ?? 0) < 1) {
+            throw new RuntimeException('AUTH_LOGIN_ATTEMPT_LIMIT must be at least 1.');
+        }
+        if ((int) ($auth['login_attempt_window_seconds'] ?? 0) < 60) {
+            throw new RuntimeException('AUTH_LOGIN_ATTEMPT_WINDOW_SECONDS must be at least 60.');
+        }
+
+        $mail = (array) ($config['mail'] ?? []);
+        $mailDriver = strtolower(trim((string) ($mail['driver'] ?? '')));
+        if (!in_array($mailDriver, ['null', 'smtp'], true)) {
+            throw new RuntimeException('MAIL_DRIVER must be null or smtp.');
+        }
+
         if ($environment !== 'production') {
             return;
         }
@@ -40,6 +62,26 @@ final class RuntimeConfigurationValidator
         $this->requiredString($config, ['database', 'password'], 'DB_PASSWORD');
         $this->requiredString($config, ['stripe', 'secret_key'], 'STRIPE_SECRET_KEY');
         $this->requiredString($config, ['stripe', 'webhook_secret'], 'STRIPE_WEBHOOK_SECRET');
+
+        if ($mailDriver !== 'smtp') {
+            throw new RuntimeException('MAIL_DRIVER must be smtp in production.');
+        }
+        $this->requiredString($config, ['mail', 'smtp_host'], 'SMTP_HOST');
+        $smtpPort = (int) ($mail['smtp_port'] ?? 0);
+        if ($smtpPort < 1 || $smtpPort > 65535) {
+            throw new RuntimeException('SMTP_PORT must be between 1 and 65535.');
+        }
+        $smtpEncryption = strtolower($this->requiredString($config, ['mail', 'smtp_encryption'], 'SMTP_ENCRYPTION'));
+        if (!in_array($smtpEncryption, ['tls', 'ssl'], true)) {
+            throw new RuntimeException('SMTP_ENCRYPTION must be tls or ssl in production.');
+        }
+        $this->requiredString($config, ['mail', 'smtp_username'], 'SMTP_USERNAME');
+        $this->requiredString($config, ['mail', 'smtp_password'], 'SMTP_PASSWORD');
+        $senderEmail = $this->requiredString($config, ['mail', 'sender_email'], 'MAIL_SENDER_EMAIL');
+        if (!filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new RuntimeException('MAIL_SENDER_EMAIL must be a valid email address.');
+        }
+        $this->requiredString($config, ['mail', 'sender_name'], 'MAIL_SENDER_NAME');
 
         $leaseSigningKey = $this->requiredString($config, ['homeserver', 'lease_signing_key'], 'HOMESERVER_LEASE_SIGNING_KEY');
         if (strlen($leaseSigningKey) < 32) {
