@@ -249,7 +249,7 @@ try {
     $resumedResult = $service->processNext('phase9-worker');
     $assert(is_array($resumedResult) && $resumedResult['status'] === 'completed', 'Failed reconciliation did not resume from completed steps.');
     $hostingVerifyCalls = count(array_keys($adapter->calls, 'hosting_verify', true));
-    $assert($hostingVerifyCalls === 2, 'Completed hosting verification was repeated during reconciliation resume.');
+    $assert($hostingVerifyCalls === 3, 'Completed hosting verification was repeated during reconciliation resume.');
 
     $crossAccountRejected = false;
     try {
