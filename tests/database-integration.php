@@ -78,10 +78,13 @@ try {
     }
 
     $now = new DateTimeImmutable('now');
+    $absoluteExpiry = $now->modify('+1 hour');
     $pdo->prepare(
         'INSERT INTO auth_sessions
-         (user_id, session_public_id, session_hash, ip_hash, user_agent_hash, last_seen_at, expires_at, created_at)
-         VALUES (:user_id, :public_id, :hash, :ip_hash, :ua_hash, :last_seen, :expires_at, :created_at)'
+         (user_id, session_public_id, session_hash, ip_hash, user_agent_hash, last_seen_at, expires_at,
+          inactivity_expires_at, absolute_expires_at, updated_at, created_at)
+         VALUES (:user_id, :public_id, :hash, :ip_hash, :ua_hash, :last_seen, :expires_at,
+          :inactivity_expires_at, :absolute_expires_at, :updated_at, :created_at)'
     )->execute([
         'user_id' => $registered['user_id'],
         'public_id' => 'SES-' . strtoupper(bin2hex(random_bytes(8))),
@@ -89,7 +92,10 @@ try {
         'ip_hash' => hash('sha256', '127.0.0.1'),
         'ua_hash' => hash('sha256', 'vp3-ci'),
         'last_seen' => $now->format('Y-m-d H:i:s'),
-        'expires_at' => $now->modify('+1 hour')->format('Y-m-d H:i:s'),
+        'expires_at' => $absoluteExpiry->format('Y-m-d H:i:s'),
+        'inactivity_expires_at' => $absoluteExpiry->format('Y-m-d H:i:s'),
+        'absolute_expires_at' => $absoluteExpiry->format('Y-m-d H:i:s'),
+        'updated_at' => $now->format('Y-m-d H:i:s'),
         'created_at' => $now->format('Y-m-d H:i:s'),
     ]);
 
