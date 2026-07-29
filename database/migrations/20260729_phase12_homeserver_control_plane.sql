@@ -5,15 +5,6 @@ DROP PROCEDURE IF EXISTS vp3_phase12_homeserver_index_upgrade;
 DELIMITER $$
 CREATE PROCEDURE vp3_phase12_homeserver_index_upgrade()
 BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.statistics
-        WHERE table_schema = DATABASE()
-          AND table_name = 'homeserver_devices'
-          AND index_name = 'uq_homeserver_license'
-          AND non_unique = 0
-    ) THEN
-        ALTER TABLE homeserver_devices DROP INDEX uq_homeserver_license;
-    END IF;
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.statistics
         WHERE table_schema = DATABASE()
@@ -21,6 +12,14 @@ BEGIN
           AND index_name = 'idx_homeserver_license_status'
     ) THEN
         ALTER TABLE homeserver_devices ADD KEY idx_homeserver_license_status (license_id,status);
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+          AND table_name = 'homeserver_devices'
+          AND index_name = 'uq_homeserver_license'
+    ) THEN
+        ALTER TABLE homeserver_devices DROP INDEX uq_homeserver_license;
     END IF;
 END$$
 DELIMITER ;
