@@ -5,6 +5,12 @@ declare(strict_types=1);
 use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\PasswordPolicy;
+use Vp3\Billing\BillingGraceService;
+use Vp3\Billing\StripeApiClient;
+use Vp3\Billing\StripeCatalogService;
+use Vp3\Billing\StripeCheckoutService;
+use Vp3\Billing\StripeSignatureVerifier;
+use Vp3\Billing\StripeWebhookService;
 use Vp3\Billing\SubscriptionLifecycleService;
 use Vp3\Catalog\PlanCatalogService;
 use Vp3\Database;
@@ -44,6 +50,18 @@ $subscriptionLifecycle = new SubscriptionLifecycleService($database);
 $domainRegistry = new DomainRegistryService($database);
 $domainLicenseBundles = new DomainLicenseBundleService($database);
 $licenseLifecycle = new LicenseLifecycleService($database);
+$stripeGateway = new StripeApiClient(
+    (string) $config['stripe']['secret_key'],
+    (string) $config['stripe']['api_base']
+);
+$stripeSignatureVerifier = new StripeSignatureVerifier(
+    (string) $config['stripe']['webhook_secret'],
+    (int) $config['stripe']['signature_tolerance_seconds']
+);
+$stripeCatalog = new StripeCatalogService($database);
+$stripeCheckout = new StripeCheckoutService($database, $stripeGateway);
+$stripeWebhooks = new StripeWebhookService($database, $stripeSignatureVerifier, (int) $config['stripe']['grace_days']);
+$billingGrace = new BillingGraceService($database);
 $session = new SessionManager([
     'name' => (string) $config['app']['session_name'],
     'secure' => (bool) $config['app']['session_secure'],
@@ -59,5 +77,11 @@ return [
     'domain_registry' => $domainRegistry,
     'domain_license_bundles' => $domainLicenseBundles,
     'license_lifecycle' => $licenseLifecycle,
+    'stripe_gateway' => $stripeGateway,
+    'stripe_signature_verifier' => $stripeSignatureVerifier,
+    'stripe_catalog' => $stripeCatalog,
+    'stripe_checkout' => $stripeCheckout,
+    'stripe_webhooks' => $stripeWebhooks,
+    'billing_grace' => $billingGrace,
     'session' => $session,
 ];
