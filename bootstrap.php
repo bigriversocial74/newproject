@@ -22,6 +22,9 @@ use Vp3\DomainCodes\DomainRegistryService;
 use Vp3\HomeServers\HomeServerLeaseSigner;
 use Vp3\HomeServers\HomeServerRegistryService;
 use Vp3\Http\SessionManager;
+use Vp3\Infrastructure\InfrastructureProviderService;
+use Vp3\Infrastructure\NullInfrastructureProviderAdapter;
+use Vp3\Infrastructure\ProviderSecretCipher;
 use Vp3\Licensing\DomainLicenseBundleService;
 use Vp3\Licensing\LicenseLifecycleService;
 use Vp3\Provisioning\NullPodProvisioningAdapter;
@@ -94,6 +97,19 @@ $backups = new BackupService(
     (float) $config['backups']['warning_threshold_percent'],
     (float) $config['backups']['critical_threshold_percent']
 );
+$infrastructureConfig = (array) ($config['infrastructure'] ?? []);
+$providerSecretCipher = new ProviderSecretCipher(
+    (string) ($infrastructureConfig['secret_encryption_key_base64'] ?? getenv('PROVIDER_SECRET_ENCRYPTION_KEY_B64') ?: ''),
+    (string) ($infrastructureConfig['secret_encryption_key_id'] ?? getenv('PROVIDER_SECRET_ENCRYPTION_KEY_ID') ?: 'provider-aes256gcm-v1')
+);
+$infrastructureProviderAdapter = new NullInfrastructureProviderAdapter();
+$infrastructure = new InfrastructureProviderService(
+    $database,
+    $providerSecretCipher,
+    $infrastructureProviderAdapter,
+    $infrastructureProviderAdapter,
+    $infrastructureProviderAdapter
+);
 $session = new SessionManager(['name' => (string) $config['app']['session_name'], 'secure' => (bool) $config['app']['session_secure']]);
 
 return [
@@ -124,5 +140,8 @@ return [
     'backup_provider_adapter' => $backupProviderAdapter,
     'backup_metadata_cipher' => $backupMetadataCipher,
     'backups' => $backups,
+    'provider_secret_cipher' => $providerSecretCipher,
+    'infrastructure_provider_adapter' => $infrastructureProviderAdapter,
+    'infrastructure' => $infrastructure,
     'session' => $session,
 ];
