@@ -27,4 +27,11 @@ return [
         'login_attempt_limit' => 8,
         'login_attempt_window_seconds' => 900,
     ],
+    'stripe' => [
+        'secret_key' => getenv('STRIPE_SECRET_KEY') ?: '',
+        'webhook_secret' => getenv('STRIPE_WEBHOOK_SECRET') ?: '',
+        'api_base' => rtrim((string) (getenv('STRIPE_API_BASE') ?: 'https://api.stripe.com/v1'), '/'),
+        'signature_tolerance_seconds' => max(60, (int) (getenv('STRIPE_SIGNATURE_TOLERANCE_SECONDS') ?: 300)),
+        'grace_days' => max(1, (int) (getenv('STRIPE_GRACE_DAYS') ?: 7)),
+    ],
 ];
