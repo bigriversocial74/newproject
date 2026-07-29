@@ -1,12 +1,6 @@
 name: Apply Phase 11A Payload
 
 on:
-  push:
-    branches:
-      - feature/vp3-phase-11a-runtime-queue-hardening-20260729
-    paths:
-      - '.phase11a-payload/**'
-      - '.github/workflows/apply-phase11a-payload.yml'
   pull_request:
     branches:
       - main
@@ -24,7 +18,7 @@ concurrency:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]' && (github.event_name == 'push' || github.head_ref == 'feature/vp3-phase-11a-runtime-queue-hardening-20260729')
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/vp3-phase-11a-runtime-queue-hardening-20260729'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,8 +30,8 @@ jobs:
           cat .phase11a-payload/part-* | base64 -d | gzip -d > /tmp/phase11a.patch
           git apply --check /tmp/phase11a.patch
           git apply /tmp/phase11a.patch
+          rm -f .github/workflows/phase11a-runtime-queue-hardening.yml
           rm -rf .phase11a-payload
-          rm -f .github/workflows/apply-phase11a-payload.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
