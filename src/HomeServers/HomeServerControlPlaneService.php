@@ -296,7 +296,7 @@ final class HomeServerControlPlaneService
                 'id' => $device['id'],
             ]);
             if ($suspended) {
-                $this->revokeDeviceAuthority($pdo, (int) $device['id']);
+                $this->revokeSoftwareAuthority($pdo, (int) $device['id']);
             }
             $this->event($accountId, (int) $device['id'], $requestId, $suspended ? 'device_suspended' : 'device_resumed', 'success', null, $pdo);
         });
@@ -520,6 +520,14 @@ final class HomeServerControlPlaneService
                 'download_path' => '/api/homeserver/v1/installer-download.php?grant=' . rawurlencode($token),
             ];
         });
+    }
+
+    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void
+    {
+        $pdo->prepare("UPDATE homeserver_entitlement_leases SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'")
+            ->execute(['device' => $deviceId]);
+        $pdo->prepare("UPDATE homeserver_installer_grants SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'")
+            ->execute(['device' => $deviceId]);
     }
 
     private function revokeDeviceAuthority(PDO $pdo, int $deviceId): void
