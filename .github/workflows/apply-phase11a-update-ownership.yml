@@ -1,4 +1,4 @@
-name: Apply Phase 11A Update Ownership Repair
+name: Apply Phase 11A Infrastructure Ownership Repair
 
 on:
   pull_request:
@@ -25,16 +25,15 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
-      - name: Apply and validate update ownership repair
+      - name: Apply and validate infrastructure ownership repair
         run: |
-          # Reclaimed workers must verify ownership transactionally before same-stage writes.
-          python3 .phase11a-update-ownership/apply.py
-          rm -rf .phase11a-update-ownership
-          php -l src/Updates/SoftwareUpdateService.php
+          python3 .phase11a-infrastructure-ownership/apply.py
+          rm -rf .phase11a-infrastructure-ownership
+          php -l src/Infrastructure/InfrastructureProviderService.php
           php tests/phase11a_contract.php
           php tests/phase11a_runtime.php
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Harden reclaimed update worker ownership"
+          git commit -m "Harden reclaimed infrastructure worker ownership"
           git push origin HEAD:feature/vp3-phase-11a-runtime-queue-hardening-20260729
