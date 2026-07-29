@@ -1,0 +1,141 @@
+name: Phase 9 Provider Adapters
+
+on:
+  push:
+    branches:
+      - feature/vp3-phase-9-provider-adapters-20260729
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Validate PHP syntax
+        run: find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Run retained Phase 2 tests
+        run: php tests/run.php
+      - name: Run retained contracts
+        run: |
+          php tests/phase3_contract.php
+          php tests/phase4_contract.php
+          php tests/phase5_contract.php
+          php tests/phase6_contract.php
+          php tests/phase7_contract.php
+          php tests/phase8_contract.php
+      - name: Run Phase 9 contract
+        run: php tests/phase9_contract.php
+      - name: Validate cumulative installer
+        run: |
+          grep -q '20260729_phase9_provider_adapters.sql' database/vp3-single-install.sql
+          grep -q 'aes-256-gcm' src/Infrastructure/ProviderSecretCipher.php
+          grep -q 'certificate_revoke' src/Infrastructure/InfrastructureProviderService.php
+          grep -q 'hosting_release' src/Infrastructure/InfrastructureProviderService.php
+
+  mysql8:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: vp3_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+      - name: Import cumulative schema twice
+        working-directory: database
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
+      - name: Run retained Phase 3-8 database certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/phase3_database_integration.php
+          php tests/phase4_database_integration.php
+          php tests/phase5_database_integration.php
+          php tests/phase6_database_integration.php
+          php tests/phase7_database_integration.php
+          php tests/phase8_database_integration.php
+      - name: Run MySQL 8 Phase 9 certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase9_database_integration.php
+
+  mariadb1011:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: vp3_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Install MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+      - name: Import cumulative schema twice
+        working-directory: database
+        run: |
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
+      - name: Run retained Phase 3-8 database certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/phase3_database_integration.php
+          php tests/phase4_database_integration.php
+          php tests/phase5_database_integration.php
+          php tests/phase6_database_integration.php
+          php tests/phase7_database_integration.php
+          php tests/phase8_database_integration.php
+      - name: Run MariaDB 10.11 Phase 9 certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase9_database_integration.php
