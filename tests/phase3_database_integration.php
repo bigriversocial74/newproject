@@ -207,7 +207,9 @@ try {
     );
     $products->execute(['domain_id' => $activated['domain_id']]);
     $productRows = $products->fetchAll();
-    if (count($productRows) !== 2 || array_column($productRows, 'product_type') !== ['homeserver', 'pod']) {
+    $productTypes = array_column($productRows, 'product_type');
+    sort($productTypes);
+    if (count($productRows) !== 2 || $productTypes !== ['homeserver', 'pod']) {
         $failures[] = 'The active Domain does not have exactly one POD and one HomeServer license.';
     }
     if (count(array_unique(array_map('intval', array_column($productRows, 'entitlement_bundle_id')))) !== 1) {
