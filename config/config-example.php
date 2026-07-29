@@ -48,4 +48,10 @@ return [
         'lease_ttl_seconds' => max(300, (int) (getenv('HOMESERVER_LEASE_TTL_SECONDS') ?: 3600)),
         'offline_after_minutes' => max(1, (int) (getenv('HOMESERVER_OFFLINE_AFTER_MINUTES') ?: 10)),
     ],
+    'releases' => [
+        'signing_private_key_base64' => getenv('RELEASE_SIGNING_PRIVATE_KEY_B64') ?: '',
+        'signing_public_key_base64' => getenv('RELEASE_SIGNING_PUBLIC_KEY_B64') ?: '',
+        'signing_key_id' => getenv('RELEASE_SIGNING_KEY_ID') ?: 'release-ed25519-v1',
+        'update_provider_driver' => getenv('VP3_UPDATE_PROVIDER_DRIVER') ?: 'null',
+    ],
 ];

@@ -24,6 +24,10 @@ use Vp3\Licensing\LicenseLifecycleService;
 use Vp3\Provisioning\NullPodProvisioningAdapter;
 use Vp3\Provisioning\PodProvisioningService;
 use Vp3\Provisioning\ProtectedConfigurationMerger;
+use Vp3\Releases\ReleaseCatalogService;
+use Vp3\Releases\ReleaseManifestSigner;
+use Vp3\Updates\NullSoftwareUpdateAdapter;
+use Vp3\Updates\SoftwareUpdateService;
 
 $autoload = __DIR__ . '/vendor/autoload.php';
 if (!is_file($autoload)) {
@@ -56,40 +60,26 @@ $subscriptionLifecycle = new SubscriptionLifecycleService($database);
 $domainRegistry = new DomainRegistryService($database);
 $domainLicenseBundles = new DomainLicenseBundleService($database);
 $licenseLifecycle = new LicenseLifecycleService($database);
-$stripeGateway = new StripeApiClient(
-    (string) $config['stripe']['secret_key'],
-    (string) $config['stripe']['api_base']
-);
-$stripeSignatureVerifier = new StripeSignatureVerifier(
-    (string) $config['stripe']['webhook_secret'],
-    (int) $config['stripe']['signature_tolerance_seconds']
-);
+$stripeGateway = new StripeApiClient((string) $config['stripe']['secret_key'], (string) $config['stripe']['api_base']);
+$stripeSignatureVerifier = new StripeSignatureVerifier((string) $config['stripe']['webhook_secret'], (int) $config['stripe']['signature_tolerance_seconds']);
 $stripeCatalog = new StripeCatalogService($database);
 $stripeCheckout = new StripeCheckoutService($database, $stripeGateway);
 $stripeWebhooks = new StripeWebhookService($database, $stripeSignatureVerifier, (int) $config['stripe']['grace_days']);
 $billingGrace = new BillingGraceService($database);
 $podProvisioningAdapter = new NullPodProvisioningAdapter();
-$podProvisioning = new PodProvisioningService(
-    $database,
-    $podProvisioningAdapter,
-    new ProtectedConfigurationMerger(),
-    (array) $config['provisioning']['protected_configuration_paths']
-);
+$podProvisioning = new PodProvisioningService($database, $podProvisioningAdapter, new ProtectedConfigurationMerger(), (array) $config['provisioning']['protected_configuration_paths']);
 $podHealth = new PodHealthService($database);
-$homeServerLeaseSigner = new HomeServerLeaseSigner(
-    (string) $config['homeserver']['lease_signing_key'],
-    (string) $config['homeserver']['lease_signing_key_id']
+$homeServerLeaseSigner = new HomeServerLeaseSigner((string) $config['homeserver']['lease_signing_key'], (string) $config['homeserver']['lease_signing_key_id']);
+$homeServers = new HomeServerRegistryService($database, $homeServerLeaseSigner, (int) $config['homeserver']['pairing_ttl_seconds'], (int) $config['homeserver']['lease_ttl_seconds']);
+$releaseManifestSigner = new ReleaseManifestSigner(
+    (string) $config['releases']['signing_private_key_base64'],
+    (string) $config['releases']['signing_public_key_base64'],
+    (string) $config['releases']['signing_key_id']
 );
-$homeServers = new HomeServerRegistryService(
-    $database,
-    $homeServerLeaseSigner,
-    (int) $config['homeserver']['pairing_ttl_seconds'],
-    (int) $config['homeserver']['lease_ttl_seconds']
-);
-$session = new SessionManager([
-    'name' => (string) $config['app']['session_name'],
-    'secure' => (bool) $config['app']['session_secure'],
-]);
+$releaseCatalog = new ReleaseCatalogService($database, $releaseManifestSigner);
+$softwareUpdateAdapter = new NullSoftwareUpdateAdapter();
+$softwareUpdates = new SoftwareUpdateService($database, $softwareUpdateAdapter);
+$session = new SessionManager(['name' => (string) $config['app']['session_name'], 'secure' => (bool) $config['app']['session_secure']]);
 
 return [
     'config' => $config,
@@ -112,5 +102,9 @@ return [
     'pod_health' => $podHealth,
     'homeserver_lease_signer' => $homeServerLeaseSigner,
     'homeservers' => $homeServers,
+    'release_manifest_signer' => $releaseManifestSigner,
+    'release_catalog' => $releaseCatalog,
+    'software_update_adapter' => $softwareUpdateAdapter,
+    'software_updates' => $softwareUpdates,
     'session' => $session,
 ];
