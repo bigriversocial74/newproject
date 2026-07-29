@@ -11,3 +11,4 @@ SOURCE migrations/20260729_phase8_backups_storage.sql;
 SOURCE migrations/20260729_phase8_backup_job_snapshots.sql;
 SOURCE migrations/20260729_phase8_snapshot_identity.sql;
 SOURCE migrations/20260729_phase9_provider_adapters.sql;
+SOURCE migrations/20260729_phase10_operations_readiness.sql;
