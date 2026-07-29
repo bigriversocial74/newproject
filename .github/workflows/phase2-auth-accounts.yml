@@ -26,10 +26,74 @@ jobs:
         run: find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Run executable tests
         run: php tests/run.php
-      - name: Validate migration structure
+      - name: Validate cumulative installer
         run: |
-          grep -q 'CREATE TABLE IF NOT EXISTS accounts' database/migrations/20260728_phase2_auth_accounts.sql
-          grep -q 'CREATE TABLE IF NOT EXISTS users' database/migrations/20260728_phase2_auth_accounts.sql
-          grep -q 'CREATE TABLE IF NOT EXISTS account_users' database/migrations/20260728_phase2_auth_accounts.sql
-          grep -q 'CREATE TABLE IF NOT EXISTS account_contacts' database/migrations/20260729_phase2_auth_accounts_quality.sql
-          grep -q 'CREATE TABLE IF NOT EXISTS security_events' database/migrations/20260729_phase2_auth_accounts_quality.sql
+          grep -q 'SOURCE migrations/20260728_phase2_auth_accounts.sql' database/phase2-auth-accounts-single-install.sql
+          grep -q 'SOURCE migrations/20260729_phase2_auth_accounts_quality.sql' database/phase2-auth-accounts-single-install.sql
+          grep -q 'SOURCE migrations/20260729_phase2_auth_accounts_completion.sql' database/phase2-auth-accounts-single-install.sql
+
+  mysql8:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: vp3_test_root
+          MYSQL_DATABASE: vp3_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pvp3_test_root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_mysql, json, mbstring
+          coverage: none
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y default-mysql-client
+      - name: Import cumulative Phase 2 schema
+        run: mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260728_phase2_auth_accounts.sql && mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_quality.sql && mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_completion.sql
+      - name: Run MySQL 8 integration certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: vp3_test_root
+        run: php tests/database-integration.php
+
+  mariadb1011:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: vp3_test_root
+          MARIADB_DATABASE: vp3_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -pvp3_test_root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_mysql, json, mbstring
+          coverage: none
+      - name: Install MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+      - name: Import cumulative Phase 2 schema
+        run: mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260728_phase2_auth_accounts.sql && mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_quality.sql && mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < database/migrations/20260729_phase2_auth_accounts_completion.sql
+      - name: Run MariaDB 10.11 integration certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: vp3_test_root
+        run: php tests/database-integration.php
