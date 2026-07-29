@@ -49,7 +49,7 @@ foreach (['PROVIDER_SECRET_ENCRYPTION_KEY_B64', 'PROVIDER_SECRET_ENCRYPTION_KEY_
     $assert(str_contains($config, $setting), 'Missing Phase 9 production configuration: ' . $setting);
 }
 $bootstrap = file_get_contents($root . '/bootstrap.php') ?: '';
-foreach (['ProviderSecretCipher', 'NullInfrastructureProviderAdapter', 'InfrastructureProviderService', "'infrastructure' => $infrastructure"] as $wiring) {
+foreach (['ProviderSecretCipher', 'AdapterFactory::infrastructure', 'InfrastructureProviderService', "'infrastructure' => \$infrastructure"] as $wiring) {
     $assert(str_contains($bootstrap, $wiring), 'Missing Phase 9 production bootstrap wiring: ' . $wiring);
 }
 if ($failures !== []) {

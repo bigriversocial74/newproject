@@ -8,16 +8,22 @@ use PDO;
 use RuntimeException;
 use Throwable;
 use Vp3\Database;
+use Vp3\Queue\QueueLease;
+use Vp3\Queue\QueueLeaseLostException;
 
 final class SoftwareUpdateService
 {
+    private readonly QueueLease $queueLease;
+
     /** @var list<string> */
     public const STAGES = ['validating', 'backing_up', 'downloading', 'installing', 'migrating', 'verifying', 'completed'];
 
     public function __construct(
         private readonly Database $database,
-        private readonly SoftwareUpdateAdapter $adapter
+        private readonly SoftwareUpdateAdapter $adapter,
+        int $leaseSeconds = 900
     ) {
+        $this->queueLease = new QueueLease($leaseSeconds);
     }
 
     /** @return array{job_id:int,job_public_id:string,replayed:bool} */
@@ -97,17 +103,23 @@ final class SoftwareUpdateService
         }
         $job = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
             $row = $pdo->query(
-                "SELECT * FROM update_jobs WHERE status IN ('queued','running') AND available_at<=UTC_TIMESTAMP()
-                 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                "SELECT * FROM update_jobs WHERE
+                 (status='queued' OR (status IN ('running','validating','backing_up','downloading','installing','migrating','verifying','rolling_back')
+                  AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
+                 AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
             )->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE update_jobs SET status='running',attempts=attempts+1,locked_by=:worker,locked_at=UTC_TIMESTAMP(),
+                 locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,
                  started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['worker' => $workerId, 'id' => $row['id']]);
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $row['id']]);
             $row['attempts'] = (int) $row['attempts'] + 1;
+            $row['lease_token'] = $token;
             return $row;
         });
         if ($job === null) {
@@ -146,56 +158,92 @@ final class SoftwareUpdateService
             }
             $stage = (string) $step['stage'];
             try {
-                $pdo->prepare("UPDATE update_jobs SET status=:status,current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['status' => $stage === 'completed' ? 'running' : $stage, 'stage' => $stage, 'id' => $job['id']]);
-                $pdo->prepare("UPDATE update_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $step['id']]);
+                $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+                $this->ownedTransaction($job, function (PDO $owned) use ($job, $step, $stage): void {
+                    $owned->prepare("UPDATE update_jobs SET status='running',current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token")
+                        ->execute(['stage' => $stage, 'id' => $job['id'], 'token' => $job['lease_token']]);
+                    $owned->prepare("UPDATE update_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                        ->execute(['id' => $step['id']]);
+                });
                 if ($stage === 'validating') {
                     $this->assertEligible($release, $target);
                     $result = ['eligible' => true];
                 } elseif ($stage === 'backing_up') {
                     $result = $this->adapter->createPreUpdateBackup($target, $release);
+                    $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
                     $reference = trim((string) ($result['reference'] ?? ''));
                     $hash = strtolower(trim((string) ($result['hash'] ?? '')));
                     if ($reference === '' || !preg_match('/^[a-f0-9]{64}$/', $hash) || ($result['verified'] ?? false) !== true) {
                         throw new RuntimeException('Pre-update backup must be created and verified before installation.');
                     }
-                    $pdo->prepare(
-                        'UPDATE update_jobs SET pre_update_backup_reference=:reference,pre_update_backup_hash=:hash,
-                         pre_update_backup_verified=1,updated_at=UTC_TIMESTAMP() WHERE id=:id'
-                    )->execute(['reference' => substr($reference, 0, 512), 'hash' => $hash, 'id' => $job['id']]);
                     $job['pre_update_backup_reference'] = $reference;
                     $job['pre_update_backup_hash'] = $hash;
                     $job['pre_update_backup_verified'] = 1;
                 } elseif ($stage === 'completed') {
                     $result = ['completed' => true];
-                    $this->updateVersion($pdo, $job, (string) $release['version']);
                 } else {
                     if (in_array($stage, ['installing', 'migrating', 'verifying'], true) && (int) ($job['pre_update_backup_verified'] ?? 0) !== 1) {
                         throw new RuntimeException('Verified pre-update backup is required before installation.');
                     }
                     $result = $this->adapter->executeStage($stage, $target, $release, $job);
+                    $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
                     if ($stage === 'verifying' && ($result['verified'] ?? false) !== true) {
                         throw new RuntimeException('Post-update verification failed.');
                     }
                 }
+                $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
                 $hash = hash('sha256', $this->json($result));
-                $pdo->prepare(
-                    "UPDATE update_steps SET status='completed',receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),
-                     last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-                )->execute(['hash' => $hash, 'id' => $step['id']]);
-                $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], (int) $step['id'], (string) $job['request_id'], $stage, 'success', $hash, $this->metadata($result));
+                $this->ownedTransaction($job, function (PDO $owned) use ($job, $step, $stage, $result, $hash, $release): void {
+                    if ($stage === 'backing_up') {
+                        $owned->prepare(
+                            'UPDATE update_jobs SET pre_update_backup_reference=:reference,pre_update_backup_hash=:hash,
+                             pre_update_backup_verified=1,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token'
+                        )->execute([
+                            'reference' => substr((string) $job['pre_update_backup_reference'], 0, 512),
+                            'hash' => (string) $job['pre_update_backup_hash'],
+                            'id' => $job['id'],
+                            'token' => $job['lease_token'],
+                        ]);
+                    }
+                    if ($stage === 'completed') {
+                        $this->updateVersion($owned, $job, (string) $release['version']);
+                    }
+                    $owned->prepare(
+                        "UPDATE update_steps SET status='completed',receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),
+                         last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id"
+                    )->execute(['hash' => $hash, 'id' => $step['id']]);
+                    $this->receipt($owned, (int) $job['account_id'], (int) $job['id'], (int) $step['id'], (string) $job['request_id'], $stage, 'success', $hash, $this->metadata($result));
+                });
+            } catch (QueueLeaseLostException) {
+                return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
             } catch (Throwable $exception) {
-                $pdo->prepare(
-                    "UPDATE update_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-                )->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $step['id']]);
-                $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], (int) $step['id'], (string) $job['request_id'], $stage, 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
+                try {
+                    $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+                    $this->ownedTransaction($job, function (PDO $owned) use ($job, $step, $stage, $exception): void {
+                        $owned->prepare(
+                            "UPDATE update_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
+                        )->execute([
+                            'code' => substr($exception::class, 0, 100),
+                            'message' => substr($exception->getMessage(), 0, 1000),
+                            'id' => $step['id'],
+                        ]);
+                        $this->receipt($owned, (int) $job['account_id'], (int) $job['id'], (int) $step['id'], (string) $job['request_id'], $stage, 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
+                    });
+                } catch (QueueLeaseLostException) {
+                    return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+                }
                 return $this->failOrRollback($job, $target, $release, $exception);
             }
         }
-        $pdo->prepare(
-            "UPDATE update_jobs SET status='completed',current_stage='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-        )->execute(['id' => $job['id']]);
+        $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+        $statement = $pdo->prepare(
+            "UPDATE update_jobs SET status='completed',current_stage='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,
+             locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+        );
+        $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+        if ($statement->rowCount() !== 1) {
+            return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+        }
         return ['job_id' => (int) $job['id'], 'status' => 'completed', 'version' => $release['version']];
     }
 
@@ -205,36 +253,57 @@ final class SoftwareUpdateService
         $pdo = $this->database->pdo();
         if ((int) ($job['pre_update_backup_verified'] ?? 0) === 1) {
             try {
-                $pdo->prepare("UPDATE update_jobs SET status='rolling_back',current_stage='rolling_back',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $job['id']]);
+                $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+                $pdo->prepare("UPDATE update_jobs SET status='running',current_stage='rolling_back',updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token")
+                    ->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
                 $result = $this->adapter->rollback($target, $release, $job);
+                $this->queueLease->renew($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
                 if (($result['restored'] ?? false) !== true) {
                     throw new RuntimeException('Update rollback did not verify restoration.');
                 }
                 $this->updateVersion($pdo, $job, (string) $job['previous_version']);
-                $pdo->prepare(
+                $statement = $pdo->prepare(
                     "UPDATE update_jobs SET status='rolled_back',current_stage='rolled_back',completed_at=UTC_TIMESTAMP(),
-                     locked_at=NULL,locked_by=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-                )->execute([
+                     locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+                );
+                $statement->execute([
                     'code' => substr($exception::class, 0, 100),
                     'message' => substr($exception->getMessage(), 0, 1000),
                     'id' => $job['id'],
+                    'token' => $job['lease_token'],
                 ]);
+                $this->queueLease->assertUpdated($statement);
                 $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], null, (string) $job['request_id'], 'rollback', 'success', hash('sha256', $this->json($result)), $this->metadata($result));
                 return ['job_id' => (int) $job['id'], 'status' => 'rolled_back', 'error' => $exception->getMessage()];
+            } catch (QueueLeaseLostException) {
+                return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
             } catch (Throwable $rollbackException) {
                 $exception = $rollbackException;
             }
         }
-        $pdo->prepare(
-            "UPDATE update_jobs SET status='failed',locked_at=NULL,locked_by=NULL,last_error_code=:code,
-             last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-        )->execute([
+        $statement = $pdo->prepare(
+            "UPDATE update_jobs SET status='failed',locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,
+             last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+        );
+        $statement->execute([
             'code' => substr($exception::class, 0, 100),
             'message' => substr($exception->getMessage(), 0, 1000),
             'id' => $job['id'],
+            'token' => $job['lease_token'],
         ]);
+        if ($statement->rowCount() !== 1) {
+            return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+        }
         return ['job_id' => (int) $job['id'], 'status' => 'failed', 'error' => $exception->getMessage()];
+    }
+
+    /** @template T @param array<string,mixed> $job @param callable(PDO):T $callback @return T */
+    private function ownedTransaction(array $job, callable $callback): mixed
+    {
+        return $this->database->transaction(function (PDO $pdo) use ($job, $callback): mixed {
+            $this->queueLease->assertOwned($pdo, 'update_jobs', (int) $job['id'], (string) $job['lease_token']);
+            return $callback($pdo);
+        });
     }
 
     /** @return array<string,mixed> */
@@ -337,7 +406,7 @@ final class SoftwareUpdateService
         }
         $marks = implode(',', array_fill(0, count($allowed), '?'));
         $statement = $this->database->pdo()->prepare(
-            "UPDATE update_jobs SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP()
+            "UPDATE update_jobs SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP()
              WHERE id=? AND account_id=? AND status IN ({$marks})"
         );
         $statement->execute(array_merge([$next, $requestId, $jobId, $accountId], $allowed));

@@ -8,9 +8,13 @@ use PDO;
 use RuntimeException;
 use Throwable;
 use Vp3\Database;
+use Vp3\Queue\QueueLease;
+use Vp3\Queue\QueueLeaseLostException;
 
 final class InfrastructureProviderService
 {
+    private readonly QueueLease $queueLease;
+
     /** @var array<string,list<string>> */
     private const STAGES = [
         'provision' => ['hosting_allocate', 'dns_bind', 'certificate_request', 'verify', 'active'],
@@ -23,8 +27,10 @@ final class InfrastructureProviderService
         private readonly ProviderSecretCipher $cipher,
         private readonly HostingProviderAdapter $hosting,
         private readonly DnsProviderAdapter $dns,
-        private readonly CertificateProviderAdapter $certificates
+        private readonly CertificateProviderAdapter $certificates,
+        int $leaseSeconds = 900
     ) {
+        $this->queueLease = new QueueLease($leaseSeconds);
     }
 
     /** @param array<string,mixed> $authContext @return array{connection_id:int,connection_public_id:string,credential_version:int} */
@@ -190,17 +196,23 @@ final class InfrastructureProviderService
         }
         $operation = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
             $row = $pdo->query(
-                "SELECT * FROM provider_operations WHERE status='queued' AND available_at<=UTC_TIMESTAMP()
-                 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                "SELECT * FROM provider_operations WHERE
+                 (status='queued' OR (status IN ('running','hosting','dns','certificate','verifying')
+                  AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
+                 AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
             )->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE provider_operations SET status='running',attempts=attempts+1,locked_at=UTC_TIMESTAMP(),locked_by=:worker,
+                 locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,
                  started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['worker' => $workerId, 'id' => $row['id']]);
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $row['id']]);
             $row['attempts'] = (int) $row['attempts'] + 1;
+            $row['lease_token'] = $token;
             return $row;
         });
         if ($operation === null) {
@@ -348,60 +360,78 @@ final class InfrastructureProviderService
             }
             $stage = (string) $step['stage'];
             try {
+                $this->queueLease->renew($pdo, 'provider_operations', (int) $operation['id'], (string) $operation['lease_token'], ['running','hosting','dns','certificate','verifying']);
                 $status = str_starts_with($stage, 'hosting') ? 'hosting'
                     : (str_starts_with($stage, 'dns') ? 'dns'
                     : (str_starts_with($stage, 'certificate') ? 'certificate'
                     : ($stage === 'verify' ? 'verifying' : 'running')));
-                $pdo->prepare('UPDATE provider_operations SET status=:status,current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id')
-                    ->execute(['status' => $status, 'stage' => $stage, 'id' => $operation['id']]);
-                $pdo->prepare("UPDATE provider_operation_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $step['id']]);
-                $result = $this->executeStage($pdo, $stage, $binding, $deploymentRow, $auth);
+                $this->ownedTransaction($operation, function (PDO $owned) use ($operation, $step, $stage, $status): void {
+                    $owned->prepare('UPDATE provider_operations SET status=:status,current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token')
+                        ->execute(['status' => $status, 'stage' => $stage, 'id' => $operation['id'], 'token' => $operation['lease_token']]);
+                    $owned->prepare("UPDATE provider_operation_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                        ->execute(['id' => $step['id']]);
+                });
+                $result = $this->executeStage($pdo, $operation, $stage, $binding, $deploymentRow, $auth);
+                $this->queueLease->renew($pdo, 'provider_operations', (int) $operation['id'], (string) $operation['lease_token'], ['running','hosting','dns','certificate','verifying']);
                 if (in_array($stage, ['hosting_verify', 'dns_verify', 'certificate_verify'], true)
                     && ($result['verified'] ?? false) !== true) {
                     throw new RuntimeException('Infrastructure provider verification failed for stage: ' . $stage);
                 }
                 $hash = hash('sha256', $this->json($result));
-                $pdo->prepare("UPDATE provider_operation_steps SET status='completed',receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['hash' => $hash, 'id' => $step['id']]);
-                $this->receipt($pdo, (int) $operation['account_id'], (int) $operation['id'], (int) $binding['id'], (string) $operation['request_id'], $stage, 'success', $hash, $this->safeMetadata($result));
+                $this->ownedTransaction($operation, function (PDO $owned) use ($operation, $binding, $step, $stage, $hash, $result): void {
+                    $owned->prepare("UPDATE provider_operation_steps SET status='completed',receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                        ->execute(['hash' => $hash, 'id' => $step['id']]);
+                    $this->receipt($owned, (int) $operation['account_id'], (int) $operation['id'], (int) $binding['id'], (string) $operation['request_id'], $stage, 'success', $hash, $this->safeMetadata($result));
+                });
                 $binding = $this->binding($pdo, (int) $operation['account_id'], (int) $operation['binding_id'], false);
+            } catch (QueueLeaseLostException) {
+                return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
             } catch (Throwable $exception) {
-                $pdo->prepare("UPDATE provider_operation_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $step['id']]);
-                $this->receipt($pdo, (int) $operation['account_id'], (int) $operation['id'], (int) $binding['id'], (string) $operation['request_id'], $stage, 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
-                return $this->fail($operation, $exception);
+                try {
+                    $this->renewOperation($pdo, $operation);
+                } catch (QueueLeaseLostException) {
+                    return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
+                }
+                return $this->failStep($operation, $binding, $step, $stage, $exception);
             }
         }
-        $pdo->prepare("UPDATE provider_operations SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-            ->execute(['id' => $operation['id']]);
+        $this->queueLease->renew($pdo, 'provider_operations', (int) $operation['id'], (string) $operation['lease_token'], ['running','hosting','dns','certificate','verifying']);
+        $statement = $pdo->prepare(
+            "UPDATE provider_operations SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,
+             locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+        );
+        $statement->execute(['id' => $operation['id'], 'token' => $operation['lease_token']]);
+        if ($statement->rowCount() !== 1) {
+            return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
+        }
         return ['operation_id' => (int) $operation['id'], 'binding_id' => (int) $binding['id'], 'status' => 'completed', 'operation_type' => $operation['operation_type']];
     }
 
-    /** @param array<string,mixed> $binding @param array<string,mixed> $deployment @param array<string,array<string,mixed>> $auth @return array<string,mixed> */
-    private function executeStage(PDO $pdo, string $stage, array $binding, array $deployment, array $auth): array
+    /** @param array<string,mixed> $operation @param array<string,mixed> $binding @param array<string,mixed> $deployment @param array<string,array<string,mixed>> $auth @return array<string,mixed> */
+    private function executeStage(PDO $pdo, array $operation, string $stage, array $binding, array $deployment, array $auth): array
     {
         return match ($stage) {
-            'hosting_allocate' => $this->hostingAllocate($pdo, $binding, $deployment, $auth['hosting']),
-            'dns_bind' => $this->dnsBind($pdo, $binding, $auth['dns']),
-            'certificate_request' => $this->certificateRequest($pdo, $binding, $auth['certificate']),
-            'verify' => $this->verifyAll($pdo, $binding, $auth),
-            'hosting_verify' => $this->verifyHosting($pdo, $binding, $auth['hosting']),
-            'dns_verify' => $this->verifyDns($pdo, $binding, $auth['dns']),
-            'certificate_verify' => $this->verifyCertificate($pdo, $binding, $auth['certificate']),
-            'certificate_revoke' => $this->certificateRevoke($pdo, $binding, $auth['certificate']),
-            'dns_remove' => $this->dnsRemove($pdo, $binding, $auth['dns']),
-            'hosting_release' => $this->hostingRelease($pdo, $binding, $auth['hosting']),
-            'active' => $this->activate($pdo, $binding),
-            'disabled' => $this->disable($pdo, $binding),
+            'hosting_allocate' => $this->hostingAllocate($pdo, $operation, $binding, $deployment, $auth['hosting']),
+            'dns_bind' => $this->dnsBind($pdo, $operation, $binding, $auth['dns']),
+            'certificate_request' => $this->certificateRequest($pdo, $operation, $binding, $auth['certificate']),
+            'verify' => $this->verifyAll($pdo, $operation, $binding, $auth),
+            'hosting_verify' => $this->verifyHosting($pdo, $operation, $binding, $auth['hosting']),
+            'dns_verify' => $this->verifyDns($pdo, $operation, $binding, $auth['dns']),
+            'certificate_verify' => $this->verifyCertificate($pdo, $operation, $binding, $auth['certificate']),
+            'certificate_revoke' => $this->certificateRevoke($pdo, $operation, $binding, $auth['certificate']),
+            'dns_remove' => $this->dnsRemove($pdo, $operation, $binding, $auth['dns']),
+            'hosting_release' => $this->hostingRelease($pdo, $operation, $binding, $auth['hosting']),
+            'active' => $this->activate($pdo, $operation, $binding),
+            'disabled' => $this->disable($pdo, $operation, $binding),
             default => throw new RuntimeException('Unknown infrastructure stage: ' . $stage),
         };
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $deployment @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function hostingAllocate(PDO $pdo, array $binding, array $deployment, array $authContext): array
+    private function hostingAllocate(PDO $pdo, array $operation, array $binding, array $deployment, array $authContext): array
     {
         $result = $this->hosting->allocateHosting($authContext, $deployment);
+        $this->renewOperation($pdo, $operation);
         $reference = trim((string) ($result['provider_reference'] ?? ''));
         $endpoint = trim((string) ($result['endpoint'] ?? ''));
         if ($reference === '' || $endpoint === '') {
@@ -436,13 +466,14 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function dnsBind(PDO $pdo, array $binding, array $authContext): array
+    private function dnsBind(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $hosting = $this->hostingAllocation($pdo, (int) $binding['id'], true);
         $envelope = $this->decryptEnvelope($hosting, 'hosting-allocation|' . $binding['id']);
         $endpoint = (string) ($envelope['endpoint'] ?? '');
         $type = str_contains($endpoint, ':') ? 'AAAA' : (filter_var($endpoint, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'CNAME');
         $result = $this->dns->upsertRecord($authContext, (string) $binding['hostname'], $type, $endpoint);
+        $this->renewOperation($pdo, $operation);
         $reference = trim((string) ($result['provider_reference'] ?? ''));
         if ($reference === '') {
             throw new RuntimeException('DNS provider did not return a record reference.');
@@ -471,9 +502,10 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function certificateRequest(PDO $pdo, array $binding, array $authContext): array
+    private function certificateRequest(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $result = $this->certificates->requestCertificate($authContext, (string) $binding['hostname']);
+        $this->renewOperation($pdo, $operation);
         $reference = trim((string) ($result['provider_reference'] ?? ''));
         if ($reference === '') {
             throw new RuntimeException('Certificate provider did not return an order reference.');
@@ -502,11 +534,11 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,array<string,mixed>> $auth @return array<string,mixed> */
-    private function verifyAll(PDO $pdo, array $binding, array $auth): array
+    private function verifyAll(PDO $pdo, array $operation, array $binding, array $auth): array
     {
-        $hosting = $this->verifyHosting($pdo, $binding, $auth['hosting']);
-        $dns = $this->verifyDns($pdo, $binding, $auth['dns']);
-        $certificate = $this->verifyCertificate($pdo, $binding, $auth['certificate']);
+        $hosting = $this->verifyHosting($pdo, $operation, $binding, $auth['hosting']);
+        $dns = $this->verifyDns($pdo, $operation, $binding, $auth['dns']);
+        $certificate = $this->verifyCertificate($pdo, $operation, $binding, $auth['certificate']);
         if (($hosting['verified'] ?? false) !== true || ($dns['verified'] ?? false) !== true || ($certificate['verified'] ?? false) !== true) {
             throw new RuntimeException('Infrastructure provider verification failed.');
         }
@@ -514,11 +546,12 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function verifyHosting(PDO $pdo, array $binding, array $authContext): array
+    private function verifyHosting(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $allocation = $this->hostingAllocation($pdo, (int) $binding['id'], true);
         $envelope = $this->decryptEnvelope($allocation, 'hosting-allocation|' . $binding['id']);
         $result = $this->hosting->verifyHosting($authContext, (string) $envelope['reference']);
+        $this->renewOperation($pdo, $operation);
         $verified = ($result['verified'] ?? false) === true;
         $pdo->prepare('UPDATE hosting_allocations SET status=:status,updated_at=UTC_TIMESTAMP() WHERE id=:id')
             ->execute(['status' => $verified ? 'active' : 'degraded', 'id' => $allocation['id']]);
@@ -526,13 +559,14 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function verifyDns(PDO $pdo, array $binding, array $authContext): array
+    private function verifyDns(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $record = $this->dnsBinding($pdo, (int) $binding['id'], true);
         $hosting = $this->hostingAllocation($pdo, (int) $binding['id'], false);
         $hostingEnvelope = $this->decryptEnvelope($hosting, 'hosting-allocation|' . $binding['id']);
         $reference = $this->cipher->decrypt((string) $record['provider_reference_ciphertext'], (string) $record['provider_reference_nonce'], (string) $record['provider_reference_tag'], 'dns-binding|' . $binding['id'] . '|' . $record['record_name'] . '|' . $record['record_type']);
         $result = $this->dns->verifyRecord($authContext, $reference, (string) $record['record_name'], (string) $record['record_type'], (string) $hostingEnvelope['endpoint']);
+        $this->renewOperation($pdo, $operation);
         $verified = ($result['verified'] ?? false) === true;
         $pdo->prepare('UPDATE dns_bindings SET status=:status,last_verified_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id')
             ->execute(['status' => $verified ? 'active' : 'degraded', 'id' => $record['id']]);
@@ -540,11 +574,12 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function verifyCertificate(PDO $pdo, array $binding, array $authContext): array
+    private function verifyCertificate(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $order = $this->certificateOrder($pdo, (int) $binding['id'], true);
         $reference = $this->cipher->decrypt((string) $order['provider_reference_ciphertext'], (string) $order['provider_reference_nonce'], (string) $order['provider_reference_tag'], 'certificate-order|' . $binding['id']);
         $result = $this->certificates->verifyCertificate($authContext, $reference, (string) $binding['hostname']);
+        $this->renewOperation($pdo, $operation);
         $verified = ($result['verified'] ?? false) === true;
         $pdo->prepare('UPDATE certificate_orders SET status=:status,last_verified_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id')
             ->execute(['status' => $verified ? 'active' : 'degraded', 'id' => $order['id']]);
@@ -552,11 +587,12 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function certificateRevoke(PDO $pdo, array $binding, array $authContext): array
+    private function certificateRevoke(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $order = $this->certificateOrder($pdo, (int) $binding['id'], true);
         $reference = $this->cipher->decrypt((string) $order['provider_reference_ciphertext'], (string) $order['provider_reference_nonce'], (string) $order['provider_reference_tag'], 'certificate-order|' . $binding['id']);
         $result = $this->certificates->revokeCertificate($authContext, $reference);
+        $this->renewOperation($pdo, $operation);
         if (($result['revoked'] ?? false) !== true) {
             throw new RuntimeException('Certificate provider did not verify revocation.');
         }
@@ -566,11 +602,12 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function dnsRemove(PDO $pdo, array $binding, array $authContext): array
+    private function dnsRemove(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $record = $this->dnsBinding($pdo, (int) $binding['id'], true);
         $reference = $this->cipher->decrypt((string) $record['provider_reference_ciphertext'], (string) $record['provider_reference_nonce'], (string) $record['provider_reference_tag'], 'dns-binding|' . $binding['id'] . '|' . $record['record_name'] . '|' . $record['record_type']);
         $result = $this->dns->removeRecord($authContext, $reference);
+        $this->renewOperation($pdo, $operation);
         if (($result['removed'] ?? false) !== true) {
             throw new RuntimeException('DNS provider did not verify record removal.');
         }
@@ -580,11 +617,12 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @param array<string,mixed> $authContext @return array<string,mixed> */
-    private function hostingRelease(PDO $pdo, array $binding, array $authContext): array
+    private function hostingRelease(PDO $pdo, array $operation, array $binding, array $authContext): array
     {
         $allocation = $this->hostingAllocation($pdo, (int) $binding['id'], true);
         $envelope = $this->decryptEnvelope($allocation, 'hosting-allocation|' . $binding['id']);
         $result = $this->hosting->releaseHosting($authContext, (string) $envelope['reference']);
+        $this->renewOperation($pdo, $operation);
         if (($result['released'] ?? false) !== true) {
             throw new RuntimeException('Hosting provider did not verify allocation release.');
         }
@@ -594,8 +632,9 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @return array<string,mixed> */
-    private function activate(PDO $pdo, array $binding): array
+    private function activate(PDO $pdo, array $operation, array $binding): array
     {
+        $this->renewOperation($pdo, $operation);
         $pdo->prepare("UPDATE infrastructure_bindings SET status='active',activated_at=COALESCE(activated_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
             ->execute(['id' => $binding['id']]);
         $pdo->prepare("UPDATE pod_deployments SET status='active',routing_status='active',ssl_status='active',updated_at=UTC_TIMESTAMP() WHERE id=:id AND account_id=:account")
@@ -606,8 +645,9 @@ final class InfrastructureProviderService
     }
 
     /** @param array<string,mixed> $binding @return array<string,mixed> */
-    private function disable(PDO $pdo, array $binding): array
+    private function disable(PDO $pdo, array $operation, array $binding): array
     {
+        $this->renewOperation($pdo, $operation);
         $pdo->prepare("UPDATE infrastructure_bindings SET status='disabled',disabled_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
             ->execute(['id' => $binding['id']]);
         $pdo->prepare("UPDATE pod_deployments SET routing_status='disabled',ssl_status='disabled',updated_at=UTC_TIMESTAMP() WHERE id=:id AND account_id=:account")
@@ -617,22 +657,94 @@ final class InfrastructureProviderService
         return ['disabled' => true];
     }
 
+    /** @param array<string,mixed> $operation */
+    private function renewOperation(PDO $pdo, array $operation): void
+    {
+        $this->queueLease->renew(
+            $pdo,
+            'provider_operations',
+            (int) $operation['id'],
+            (string) $operation['lease_token'],
+            ['running','hosting','dns','certificate','verifying']
+        );
+    }
+
+    /** @template T @param array<string,mixed> $operation @param callable(PDO):T $callback @return T */
+    private function ownedTransaction(array $operation, callable $callback): mixed
+    {
+        return $this->database->transaction(function (PDO $pdo) use ($operation, $callback): mixed {
+            $this->queueLease->assertOwned(
+                $pdo,
+                'provider_operations',
+                (int) $operation['id'],
+                (string) $operation['lease_token'],
+                ['running','hosting','dns','certificate','verifying']
+            );
+            return $callback($pdo);
+        });
+    }
+
+    /** @param array<string,mixed> $operation @param array<string,mixed> $binding @param array<string,mixed> $step @return array<string,mixed> */
+    private function failStep(array $operation, array $binding, array $step, string $stage, Throwable $exception): array
+    {
+        try {
+            return $this->ownedTransaction($operation, function (PDO $pdo) use ($operation, $binding, $step, $stage, $exception): array {
+                $pdo->prepare("UPDATE provider_operation_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute([
+                        'code' => substr($exception::class, 0, 100),
+                        'message' => substr($exception->getMessage(), 0, 1000),
+                        'id' => $step['id'],
+                    ]);
+                $this->receipt($pdo, (int) $operation['account_id'], (int) $operation['id'], (int) $binding['id'], (string) $operation['request_id'], $stage, 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
+                $status = (int) $operation['attempts'] < (int) $operation['max_attempts'] ? 'queued' : 'failed';
+                $statement = $pdo->prepare(
+                    "UPDATE provider_operations SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
+                     locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,
+                     updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+                );
+                $statement->execute([
+                    'status' => $status,
+                    'code' => substr($exception::class, 0, 100),
+                    'message' => substr($exception->getMessage(), 0, 1000),
+                    'id' => $operation['id'],
+                    'token' => $operation['lease_token'],
+                ]);
+                $this->queueLease->assertUpdated($statement);
+                $pdo->prepare("UPDATE infrastructure_bindings SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute(['id' => $operation['binding_id']]);
+                return ['operation_id' => (int) $operation['id'], 'status' => $status, 'error' => $exception->getMessage()];
+            });
+        } catch (QueueLeaseLostException) {
+            return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
+        }
+    }
+
     /** @param array<string,mixed> $operation @return array<string,mixed> */
     private function fail(array $operation, Throwable $exception): array
     {
-        $status = (int) $operation['attempts'] < (int) $operation['max_attempts'] ? 'queued' : 'failed';
-        $this->database->pdo()->prepare(
-            "UPDATE provider_operations SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
-             locked_at=NULL,locked_by=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-        )->execute([
-            'status' => $status,
-            'code' => substr($exception::class, 0, 100),
-            'message' => substr($exception->getMessage(), 0, 1000),
-            'id' => $operation['id'],
-        ]);
-        $this->database->pdo()->prepare("UPDATE infrastructure_bindings SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-            ->execute(['id' => $operation['binding_id']]);
-        return ['operation_id' => (int) $operation['id'], 'status' => $status, 'error' => $exception->getMessage()];
+        try {
+            return $this->ownedTransaction($operation, function (PDO $pdo) use ($operation, $exception): array {
+                $status = (int) $operation['attempts'] < (int) $operation['max_attempts'] ? 'queued' : 'failed';
+                $statement = $pdo->prepare(
+                    "UPDATE provider_operations SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
+                     locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,
+                     updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+                );
+                $statement->execute([
+                    'status' => $status,
+                    'code' => substr($exception::class, 0, 100),
+                    'message' => substr($exception->getMessage(), 0, 1000),
+                    'id' => $operation['id'],
+                    'token' => $operation['lease_token'],
+                ]);
+                $this->queueLease->assertUpdated($statement);
+                $pdo->prepare("UPDATE infrastructure_bindings SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute(['id' => $operation['binding_id']]);
+                return ['operation_id' => (int) $operation['id'], 'status' => $status, 'error' => $exception->getMessage()];
+            });
+        } catch (QueueLeaseLostException) {
+            return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
+        }
     }
 
     /** @return array<string,mixed> */
@@ -747,7 +859,7 @@ final class InfrastructureProviderService
         }
         $marks = implode(',', array_fill(0, count($allowed), '?'));
         $statement = $this->database->pdo()->prepare(
-            "UPDATE provider_operations SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP()
+            "UPDATE provider_operations SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP()
              WHERE id=? AND account_id=? AND status IN ({$marks})"
         );
         $statement->execute(array_merge([$next, $requestId, $operationId, $accountId], $allowed));

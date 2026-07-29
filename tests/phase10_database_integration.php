@@ -143,7 +143,7 @@ try {
     )->fetchColumn();
     $pdo->exec(
         "UPDATE operational_notifications SET status='running',locked_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 30 MINUTE),
-         locked_by='crashed-worker' WHERE id=" . $staleNotificationId
+         locked_until=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 15 MINUTE),lease_token='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',locked_by='crashed-worker' WHERE id=" . $staleNotificationId
     );
     $staleRecovered = $service->processNextNotification('phase10-recovery');
     $assert(

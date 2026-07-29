@@ -2,10 +2,15 @@
   "name": "vp3/platform",
   "description": "VP3.me account, domain, licensing, provisioning, and operations platform",
   "type": "project",
+  "license": "proprietary",
   "require": {
     "php": "^8.2",
     "ext-pdo": "*",
-    "ext-json": "*"
+    "ext-pdo_mysql": "*",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "ext-openssl": "*",
+    "ext-sodium": "*"
   },
   "autoload": {
     "psr-4": {
@@ -14,6 +19,6 @@
   },
   "scripts": {
     "test": "php tests/run.php",
-    "lint": "find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l"
+    "lint": "find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l"
   }
 }

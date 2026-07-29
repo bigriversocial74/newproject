@@ -8,9 +8,13 @@ use PDO;
 use RuntimeException;
 use Throwable;
 use Vp3\Database;
+use Vp3\Queue\QueueLease;
+use Vp3\Queue\QueueLeaseLostException;
 
 final class PodProvisioningService
 {
+    private readonly QueueLease $queueLease;
+
     /** @var list<string> */
     public const STAGES = [
         'payment_confirmed', 'domain_registered', 'hosting_allocated', 'database_created',
@@ -23,35 +27,46 @@ final class PodProvisioningService
         private readonly Database $database,
         private readonly PodProvisioningAdapter $adapter,
         private readonly ProtectedConfigurationMerger $merger,
-        private readonly array $protectedConfigurationPaths = ['database.password', 'app.key', 'customer']
+        private readonly array $protectedConfigurationPaths = ['database.password', 'app.key', 'customer'],
+        int $leaseSeconds = 900
     ) {
+        $this->queueLease = new QueueLease($leaseSeconds);
     }
 
-    public function reconcileBillingOutbox(int $limit = 20): int
+    public function reconcileBillingOutbox(int $limit = 20, string $workerId = 'billing-reconciler'): int
     {
         $count = 0;
         while ($count < max(1, $limit)) {
-            $row = $this->database->transaction(function (PDO $pdo): ?array {
+            $row = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
                 $record = $pdo->query(
-                    "SELECT * FROM billing_outbox WHERE job_type='provisioning' AND status='pending'
+                    "SELECT * FROM billing_outbox WHERE job_type='provisioning'
+                     AND (status='pending' OR (status='processing' AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
                      AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                 )->fetch(PDO::FETCH_ASSOC);
                 if (!is_array($record)) {
                     return null;
                 }
-                $pdo->prepare("UPDATE billing_outbox SET status='processing', attempts=attempts+1, locked_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $record['id']]);
+                $token = $this->queueLease->token();
+                $seconds = $this->queueLease->seconds();
+                $pdo->prepare(
+                    "UPDATE billing_outbox SET status='processing',attempts=attempts+1,locked_by=:worker,
+                     locked_at=UTC_TIMESTAMP(),locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),
+                     lease_token=:token,updated_at=UTC_TIMESTAMP() WHERE id=:id"
+                )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $record['id']]);
+                $record['lease_token'] = $token;
                 return $record;
             });
             if ($row === null) {
                 break;
             }
             try {
+                $this->queueLease->renew($this->database->pdo(), 'billing_outbox', (int) $row['id'], (string) $row['lease_token'], ['processing']);
                 $targets = $this->targets((int) $row['account_id'], (int) $row['subscription_id']);
                 if ($targets === []) {
                     throw new RuntimeException('No eligible licensed Domain is available for POD provisioning.');
                 }
                 foreach ($targets as $target) {
+                    $this->queueLease->renew($this->database->pdo(), 'billing_outbox', (int) $row['id'], (string) $row['lease_token'], ['processing']);
                     $this->enqueue(
                         (int) $row['account_id'],
                         (int) $target['domain_id'],
@@ -60,12 +75,18 @@ final class PodProvisioningService
                         'billing-outbox:' . $row['id'] . ':domain:' . $target['domain_id']
                     );
                 }
-                $this->database->pdo()->prepare("UPDATE billing_outbox SET status='completed', completed_at=UTC_TIMESTAMP(), locked_at=NULL, last_error=NULL, updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $row['id']]);
+                $statement = $this->database->pdo()->prepare("UPDATE billing_outbox SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+                $statement->execute(['id' => $row['id'], 'token' => $row['lease_token']]);
+                $this->queueLease->assertUpdated($statement);
                 $count++;
+            } catch (QueueLeaseLostException) {
+                continue;
             } catch (Throwable $exception) {
-                $this->database->pdo()->prepare("UPDATE billing_outbox SET status='failed', locked_at=NULL, last_error=:error, updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $row['id'], 'error' => substr($exception->getMessage(), 0, 1000)]);
+                $statement = $this->database->pdo()->prepare("UPDATE billing_outbox SET status='failed',locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error=:error,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+                $statement->execute(['id' => $row['id'], 'token' => $row['lease_token'], 'error' => substr($exception->getMessage(), 0, 1000)]);
+                if ($statement->rowCount() !== 1) {
+                    continue;
+                }
             }
         }
         return $count;
@@ -201,17 +222,22 @@ final class PodProvisioningService
     {
         return $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
             $job = $pdo->query(
-                "SELECT * FROM pod_provisioning_jobs WHERE status IN ('queued','retrying')
+                "SELECT * FROM pod_provisioning_jobs
+                 WHERE (status IN ('queued','retrying') OR (status='running' AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
                  AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
             )->fetch(PDO::FETCH_ASSOC);
             if (!is_array($job)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE pod_provisioning_jobs SET status='running',attempts=attempts+1,locked_by=:worker,
-                 locked_at=UTC_TIMESTAMP(),started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['worker' => $workerId, 'id' => $job['id']]);
+                 locked_at=UTC_TIMESTAMP(),locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,
+                 started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $job['id']]);
             $job['attempts'] = (int) $job['attempts'] + 1;
+            $job['lease_token'] = $token;
             return $job;
         });
     }
@@ -233,28 +259,53 @@ final class PodProvisioningService
                 return ['job_id' => (int) $job['id'], 'status' => 'paused'];
             }
             try {
-                $pdo->prepare("UPDATE pod_provisioning_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $step['id']]);
-                $pdo->prepare('UPDATE pod_provisioning_jobs SET current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id')
-                    ->execute(['stage' => $step['stage'], 'id' => $job['id']]);
+                $this->queueLease->renew($pdo, 'pod_provisioning_jobs', (int) $job['id'], (string) $job['lease_token']);
+                $this->ownedTransaction($job, function (PDO $owned) use ($job, $step): void {
+                    $owned->prepare("UPDATE pod_provisioning_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                        ->execute(['id' => $step['id']]);
+                    $owned->prepare('UPDATE pod_provisioning_jobs SET current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token')
+                        ->execute(['stage' => $step['stage'], 'id' => $job['id'], 'token' => $job['lease_token']]);
+                });
                 $result = $step['stage'] === 'configuration_written'
-                    ? $this->configuration($deployment, (int) $job['id'])
+                    ? $this->configuration($deployment)
                     : $this->adapter->executeStage((string) $step['stage'], $deployment);
-                $this->apply($deployment, (string) $step['stage'], $result);
-                $hash = hash('sha256', $this->json($result));
-                $pdo->prepare("UPDATE pod_provisioning_steps SET status='completed',provider_receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['hash' => $hash, 'id' => $step['id']]);
-                $this->receipt($pdo, $job, $step, (string) $step['stage'], 'success', $hash, $this->metadata($result));
+                $this->queueLease->renew($pdo, 'pod_provisioning_jobs', (int) $job['id'], (string) $job['lease_token']);
+                $this->ownedTransaction($job, function (PDO $owned) use ($deployment, $job, $step, $result): void {
+                    if ($step['stage'] === 'configuration_written') {
+                        $owned->prepare(
+                            'INSERT INTO pod_configuration_receipts
+                             (deployment_id,job_id,configuration_hash,protected_roots_hash,merge_strategy,created_at)
+                             VALUES (:deployment,:job,:hash,:protected,\'preserve-existing-protected-paths\',UTC_TIMESTAMP())'
+                        )->execute([
+                            'deployment' => $deployment['id'],
+                            'job' => $job['id'],
+                            'hash' => $result['configuration_hash'],
+                            'protected' => $result['protected_roots_hash'],
+                        ]);
+                    }
+                    $this->apply($deployment, (string) $step['stage'], $result);
+                    $hash = hash('sha256', $this->json($result));
+                    $owned->prepare("UPDATE pod_provisioning_steps SET status='completed',provider_receipt_hash=:hash,completed_at=UTC_TIMESTAMP(),last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                        ->execute(['hash' => $hash, 'id' => $step['id']]);
+                    $this->receipt($owned, $job, $step, (string) $step['stage'], 'success', $hash, $this->metadata($result));
+                });
                 $deployment = $this->deployment((int) $job['deployment_id']);
+            } catch (QueueLeaseLostException) {
+                return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'lease_lost'];
             } catch (Throwable $exception) {
-                $pdo->prepare("UPDATE pod_provisioning_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $step['id']]);
-                $this->receipt($pdo, $job, $step, (string) $step['stage'], 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
-                return $this->fail($job, $exception);
+                try {
+                    $this->queueLease->renew($pdo, 'pod_provisioning_jobs', (int) $job['id'], (string) $job['lease_token']);
+                } catch (QueueLeaseLostException) {
+                    return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'lease_lost'];
+                }
+                return $this->failStep($job, $step, $exception);
             }
         }
-        $pdo->prepare("UPDATE pod_provisioning_jobs SET status='completed',current_stage='deployment_active',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-            ->execute(['id' => $job['id']]);
+        $statement = $pdo->prepare("UPDATE pod_provisioning_jobs SET status='completed',current_stage='deployment_active',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+        $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+        if ($statement->rowCount() !== 1) {
+            return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'lease_lost'];
+        }
         return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'completed'];
     }
 
@@ -270,24 +321,33 @@ final class PodProvisioningService
         $query->execute(['deployment' => $job['deployment_id']]);
         try {
             foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $step) {
+                $this->queueLease->renew($pdo, 'pod_provisioning_jobs', (int) $job['id'], (string) $job['lease_token']);
                 $result = $this->adapter->rollbackStage((string) $step['stage'], $deployment);
-                $pdo->prepare("UPDATE pod_provisioning_steps SET status='rolled_back',rolled_back_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $step['id']]);
-                $this->receipt($pdo, $job, $step, 'rollback:' . $step['stage'], 'success', hash('sha256', $this->json($result)), $this->metadata($result));
+                $this->queueLease->renew($pdo, 'pod_provisioning_jobs', (int) $job['id'], (string) $job['lease_token']);
+                $this->ownedTransaction($job, function (PDO $owned) use ($job, $step, $result): void {
+                    $owned->prepare("UPDATE pod_provisioning_steps SET status='rolled_back',rolled_back_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                        ->execute(['id' => $step['id']]);
+                    $this->receipt($owned, $job, $step, 'rollback:' . $step['stage'], 'success', hash('sha256', $this->json($result)), $this->metadata($result));
+                });
             }
-            $pdo->prepare("UPDATE pod_deployments SET status='archived',routing_status='disabled',ssl_status='disabled',archived_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['deployment_id']]);
-            $pdo->prepare("UPDATE pod_provisioning_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
-            $this->event($pdo, (int) $job['deployment_id'], (int) $job['account_id'], (string) $job['request_id'], 'deployment_rolled_back', 'success', (string) $deployment['status'], 'archived');
+            $this->ownedTransaction($job, function (PDO $owned) use ($job, $deployment): void {
+                $owned->prepare("UPDATE pod_deployments SET status='archived',routing_status='disabled',ssl_status='disabled',archived_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute(['id' => $job['deployment_id']]);
+                $statement = $owned->prepare("UPDATE pod_provisioning_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+                $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+                $this->queueLease->assertUpdated($statement);
+                $this->event($owned, (int) $job['deployment_id'], (int) $job['account_id'], (string) $job['request_id'], 'deployment_rolled_back', 'success', (string) $deployment['status'], 'archived');
+            });
             return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'completed'];
+        } catch (QueueLeaseLostException) {
+            return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'lease_lost'];
         } catch (Throwable $exception) {
             return $this->fail($job, $exception);
         }
     }
 
     /** @param array<string,mixed> $deployment @return array<string,mixed> */
-    private function configuration(array $deployment, int $jobId): array
+    private function configuration(array $deployment): array
     {
         $merged = $this->merger->merge(
             $this->adapter->readConfiguration($deployment),
@@ -295,16 +355,10 @@ final class PodProvisioningService
             $this->protectedConfigurationPaths
         );
         $result = $this->adapter->writeConfiguration($deployment, $merged);
-        $hash = hash('sha256', $this->json($merged));
-        $this->database->pdo()->prepare(
-            'INSERT INTO pod_configuration_receipts
-             (deployment_id,job_id,configuration_hash,protected_roots_hash,merge_strategy,created_at)
-             VALUES (:deployment,:job,:hash,:protected,\'preserve-existing-protected-paths\',UTC_TIMESTAMP())'
-        )->execute([
-            'deployment' => $deployment['id'], 'job' => $jobId, 'hash' => $hash,
-            'protected' => hash('sha256', $this->json($this->protectedConfigurationPaths)),
-        ]);
-        return $result + ['configuration_hash' => $hash];
+        return $result + [
+            'configuration_hash' => hash('sha256', $this->json($merged)),
+            'protected_roots_hash' => hash('sha256', $this->json($this->protectedConfigurationPaths)),
+        ];
     }
 
     /** @param array<string,mixed> $deployment @param array<string,mixed> $result */
@@ -341,17 +395,73 @@ final class PodProvisioningService
     /** @param array<string,mixed> $job @return array<string,mixed> */
     private function fail(array $job, Throwable $exception): array
     {
-        $status = (int) $job['attempts'] < (int) $job['max_attempts'] ? 'retrying' : 'failed';
-        $this->database->pdo()->prepare(
-            "UPDATE pod_provisioning_jobs SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
-             locked_at=NULL,locked_by=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-        )->execute([
-            'status' => $status, 'code' => substr($exception::class, 0, 100),
-            'message' => substr($exception->getMessage(), 0, 1000), 'id' => $job['id'],
-        ]);
-        $this->database->pdo()->prepare("UPDATE pod_deployments SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-            ->execute(['id' => $job['deployment_id']]);
-        return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => $status, 'error' => $exception->getMessage()];
+        try {
+            return $this->ownedTransaction($job, function (PDO $pdo) use ($job, $exception): array {
+                $status = (int) $job['attempts'] < (int) $job['max_attempts'] ? 'retrying' : 'failed';
+                $statement = $pdo->prepare(
+                    "UPDATE pod_provisioning_jobs SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
+                     locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,
+                     updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+                );
+                $statement->execute([
+                    'status' => $status,
+                    'code' => substr($exception::class, 0, 100),
+                    'message' => substr($exception->getMessage(), 0, 1000),
+                    'id' => $job['id'],
+                    'token' => $job['lease_token'],
+                ]);
+                $this->queueLease->assertUpdated($statement);
+                $pdo->prepare("UPDATE pod_deployments SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute(['id' => $job['deployment_id']]);
+                return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => $status, 'error' => $exception->getMessage()];
+            });
+        } catch (QueueLeaseLostException) {
+            return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'lease_lost'];
+        }
+    }
+
+    /** @param array<string,mixed> $job @param array<string,mixed> $step @return array<string,mixed> */
+    private function failStep(array $job, array $step, Throwable $exception): array
+    {
+        try {
+            return $this->ownedTransaction($job, function (PDO $pdo) use ($job, $step, $exception): array {
+                $pdo->prepare("UPDATE pod_provisioning_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute([
+                        'code' => substr($exception::class, 0, 100),
+                        'message' => substr($exception->getMessage(), 0, 1000),
+                        'id' => $step['id'],
+                    ]);
+                $this->receipt($pdo, $job, $step, (string) $step['stage'], 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
+                $status = (int) $job['attempts'] < (int) $job['max_attempts'] ? 'retrying' : 'failed';
+                $statement = $pdo->prepare(
+                    "UPDATE pod_provisioning_jobs SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
+                     locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,
+                     updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+                );
+                $statement->execute([
+                    'status' => $status,
+                    'code' => substr($exception::class, 0, 100),
+                    'message' => substr($exception->getMessage(), 0, 1000),
+                    'id' => $job['id'],
+                    'token' => $job['lease_token'],
+                ]);
+                $this->queueLease->assertUpdated($statement);
+                $pdo->prepare("UPDATE pod_deployments SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute(['id' => $job['deployment_id']]);
+                return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => $status, 'error' => $exception->getMessage()];
+            });
+        } catch (QueueLeaseLostException) {
+            return ['job_id' => (int) $job['id'], 'deployment_id' => (int) $job['deployment_id'], 'status' => 'lease_lost'];
+        }
+    }
+
+    /** @template T @param array<string,mixed> $job @param callable(PDO):T $callback @return T */
+    private function ownedTransaction(array $job, callable $callback): mixed
+    {
+        return $this->database->transaction(function (PDO $pdo) use ($job, $callback): mixed {
+            $this->queueLease->assertOwned($pdo, 'pod_provisioning_jobs', (int) $job['id'], (string) $job['lease_token']);
+            return $callback($pdo);
+        });
     }
 
     /** @return list<array{domain_id:int,license_id:int}> */
@@ -417,7 +527,7 @@ final class PodProvisioningService
         }
         $marks = implode(',', array_fill(0, count($allowed), '?'));
         $statement = $this->database->pdo()->prepare(
-            "UPDATE pod_provisioning_jobs SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,
+            "UPDATE pod_provisioning_jobs SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,
              last_error_code=NULL,last_error_message=NULL,updated_at=UTC_TIMESTAMP() WHERE id=? AND account_id=? AND status IN ({$marks})"
         );
         $statement->execute(array_merge([$next, $requestId, $jobId, $accountId], $allowed));
