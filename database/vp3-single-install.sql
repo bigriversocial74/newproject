@@ -7,3 +7,5 @@ SOURCE migrations/20260729_phase5_pod_provisioning.sql;
 SOURCE migrations/20260729_phase6_homeserver_registry.sql;
 SOURCE migrations/20260729_phase7_releases_updates.sql;
 SOURCE migrations/20260729_phase7_release_manifest_documents.sql;
+SOURCE migrations/20260729_phase8_backups_storage.sql;
+SOURCE migrations/20260729_phase8_backup_job_snapshots.sql;
