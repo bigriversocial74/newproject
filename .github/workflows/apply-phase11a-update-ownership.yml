@@ -27,6 +27,7 @@ jobs:
           coverage: none
       - name: Apply and validate update ownership repair
         run: |
+          # Reclaimed workers must verify ownership transactionally before same-stage writes.
           python3 .phase11a-update-ownership/apply.py
           rm -rf .phase11a-update-ownership
           php -l src/Updates/SoftwareUpdateService.php
