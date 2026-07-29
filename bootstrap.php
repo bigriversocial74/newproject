@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use Vp3\Auth\AccountSecurityService;
+use Vp3\Auth\AuthenticationContext;
+use Vp3\Auth\AuthAuditService;
 use Vp3\Auth\AuthService;
+use Vp3\Auth\DatabaseSessionService;
+use Vp3\Auth\Mail\MailAdapterFactory;
 use Vp3\Auth\PasswordPolicy;
 use Vp3\Backups\BackupMetadataCipher;
 use Vp3\Backups\BackupService;
@@ -68,8 +72,22 @@ $queueLeaseSeconds = (int) $config['queue']['lease_seconds'];
 
 $database = new Database($config['database']);
 $passwordPolicy = new PasswordPolicy((int) $config['auth']['password_min_length']);
-$auth = new AuthService($database, $passwordPolicy);
-$accountSecurity = new AccountSecurityService($database, $passwordPolicy);
+$authAudit = new AuthAuditService($database);
+$mailAdapter = MailAdapterFactory::create((array) $config['mail'], $environment);
+$authConfig = array_merge((array) $config['auth'], ['base_url' => (string) $config['app']['base_url']]);
+$session = new SessionManager([
+    'name' => (string) $config['app']['session_name'],
+    'secure' => (bool) $config['app']['session_secure'],
+]);
+$databaseSessions = new DatabaseSessionService(
+    $database,
+    (int) $config['auth']['session_inactivity_ttl_seconds'],
+    (int) $config['auth']['session_absolute_ttl_seconds'],
+    $authAudit
+);
+$authenticationContext = new AuthenticationContext($session, $databaseSessions);
+$auth = new AuthService($database, $passwordPolicy, $mailAdapter, $authConfig, $authAudit);
+$accountSecurity = new AccountSecurityService($database, $passwordPolicy, $mailAdapter, $authConfig, $authAudit);
 $planCatalog = new PlanCatalogService($database);
 $subscriptionLifecycle = new SubscriptionLifecycleService($database);
 $domainRegistry = new DomainRegistryService($database);
@@ -154,14 +172,17 @@ $operations = new OperationsReadinessService(
     $operationalIncidents,
     $operationsMonitor
 );
-$session = new SessionManager(['name' => (string) $config['app']['session_name'], 'secure' => (bool) $config['app']['session_secure']]);
 
 return [
     'config' => $config,
     'runtime_configuration_validator' => $runtimeConfigurationValidator,
     'database' => $database,
+    'auth_audit' => $authAudit,
+    'mail_adapter' => $mailAdapter,
     'auth' => $auth,
     'account_security' => $accountSecurity,
+    'database_sessions' => $databaseSessions,
+    'authentication_context' => $authenticationContext,
     'plan_catalog' => $planCatalog,
     'subscription_lifecycle' => $subscriptionLifecycle,
     'domain_registry' => $domainRegistry,
