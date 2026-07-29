@@ -42,6 +42,9 @@ $assert(str_contains($endpoint, 'Bearer\\s+'), 'Bearer device authentication is 
 $assert(str_contains($endpoint, 'assertCsrf'), 'Account mutation CSRF enforcement is missing.');
 $assert(str_contains($endpoint, "role IN ('owner','administrator')"), 'Account owner/administrator authorization is missing.');
 $assert(str_contains($service, "hash('sha256', \$token)"), 'Installer grant hashing is missing.');
+$assert(str_contains($service, 'function revokeSoftwareAuthority('), 'Software-only suspension revocation helper is missing.');
+$assert(str_contains($service, "\$this->revokeSoftwareAuthority(\$pdo, (int) \$device['id']);"), 'Suspension does not use the software-only authority boundary.');
+$assert(str_contains($service, 'function revokeDeviceAuthority('), 'Full device revocation helper is missing.');
 $assert(!str_contains($migration, 'credential TEXT') && !str_contains($migration, 'token TEXT'), 'Plaintext credentials or grant tokens are stored.');
 $assert(str_contains($migration, 'token_hash CHAR(64)'), 'Installer grant token hash column is missing.');
 $assert(str_contains($migration, "status ENUM('active','consumed','expired','revoked')"), 'Installer grant lifecycle is incomplete.');
