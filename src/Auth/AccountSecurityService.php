@@ -7,6 +7,7 @@ namespace Vp3\Auth;
 use DateTimeImmutable;
 use PDO;
 use RuntimeException;
+use Throwable;
 use Vp3\Auth\Mail\MailAdapter;
 use Vp3\Auth\Mail\NullMailAdapter;
 use Vp3\Database;
@@ -39,7 +40,7 @@ final class AccountSecurityService
     {
         $hash = hash('sha256', trim($token));
         $now = new DateTimeImmutable('now');
-        $verified = $this->database->transaction(function (PDO $pdo) use ($hash, $now): ?array {
+        $verified = $this->database->transaction(function (PDO $pdo) use ($hash, $now): bool {
             $statement = $pdo->prepare(
                 'SELECT evt.id, evt.user_id, u.public_id AS user_public_id, au.account_id
                  FROM email_verification_tokens evt
@@ -56,7 +57,7 @@ final class AccountSecurityService
             ]);
             $record = $statement->fetch();
             if (!$record) {
-                return null;
+                return false;
             }
 
             $pdo->prepare('UPDATE users SET status = :status, email_verified_at = :verified_at, updated_at = :updated_at WHERE id = :id')
@@ -86,28 +87,28 @@ final class AccountSecurityService
                 'user_id' => $record['user_id'],
                 'id' => $record['id'],
             ]);
-            return $record;
+            $this->audit->record(
+                'auth.email_verified',
+                'success',
+                (int) $record['user_id'],
+                $record['account_id'] === null ? null : (int) $record['account_id'],
+                'user',
+                (string) $record['user_public_id']
+            );
+            return true;
         });
 
-        if ($verified === null) {
+        if (!$verified) {
             $this->audit->record('auth.email_verified', 'denied', null, null, 'email_verification', null, ['reason' => 'invalid_expired_or_replayed']);
-            return false;
         }
-        $this->audit->record(
-            'auth.email_verified',
-            'success',
-            (int) $verified['user_id'],
-            $verified['account_id'] === null ? null : (int) $verified['account_id'],
-            'user',
-            (string) $verified['user_public_id']
-        );
-        return true;
+        return $verified;
     }
 
     public function resendVerification(string $email): ?string
     {
         $email = strtolower(trim($email));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->audit->record('auth.verification.requested', 'success', null, null, 'user', null, ['delivered' => false]);
             return null;
         }
         $pdo = $this->database->pdo();
@@ -143,18 +144,32 @@ final class AccountSecurityService
                 'created_at' => $now->format('Y-m-d H:i:s'),
             ]);
         });
-        $this->sendVerificationEmail((string) $user['email'], (string) $user['display_name'], $token);
-        $this->audit->record(
-            'auth.verification.requested',
-            'success',
-            (int) $user['id'],
-            $user['account_id'] === null ? null : (int) $user['account_id'],
-            'user',
-            (string) $user['public_id'],
-            ['delivered' => true],
-            $requestId
-        );
-        return $token;
+        try {
+            $this->sendVerificationEmail((string) $user['email'], (string) $user['display_name'], $token);
+            $this->audit->record(
+                'auth.verification.requested',
+                'success',
+                (int) $user['id'],
+                $user['account_id'] === null ? null : (int) $user['account_id'],
+                'user',
+                (string) $user['public_id'],
+                ['delivered' => true],
+                $requestId
+            );
+            return $token;
+        } catch (Throwable) {
+            $this->audit->record(
+                'auth.verification.requested',
+                'failure',
+                (int) $user['id'],
+                $user['account_id'] === null ? null : (int) $user['account_id'],
+                'user',
+                (string) $user['public_id'],
+                ['delivered' => false, 'reason' => 'mail_delivery_failed'],
+                $requestId
+            );
+            return null;
+        }
     }
 
     public function createPasswordReset(string $email): ?string
@@ -196,18 +211,32 @@ final class AccountSecurityService
                 'created_at' => $now->format('Y-m-d H:i:s'),
             ]);
         });
-        $this->sendPasswordResetEmail((string) $user['email'], (string) $user['display_name'], $token);
-        $this->audit->record(
-            'auth.password_reset.requested',
-            'success',
-            (int) $user['id'],
-            null,
-            'user',
-            (string) $user['public_id'],
-            ['delivered' => true],
-            $requestId
-        );
-        return $token;
+        try {
+            $this->sendPasswordResetEmail((string) $user['email'], (string) $user['display_name'], $token);
+            $this->audit->record(
+                'auth.password_reset.requested',
+                'success',
+                (int) $user['id'],
+                null,
+                'user',
+                (string) $user['public_id'],
+                ['delivered' => true],
+                $requestId
+            );
+            return $token;
+        } catch (Throwable) {
+            $this->audit->record(
+                'auth.password_reset.requested',
+                'failure',
+                (int) $user['id'],
+                null,
+                'user',
+                (string) $user['public_id'],
+                ['delivered' => false, 'reason' => 'mail_delivery_failed'],
+                $requestId
+            );
+            return null;
+        }
     }
 
     public function resetPassword(string $token, string $password): bool
@@ -220,7 +249,7 @@ final class AccountSecurityService
         $tokenHash = hash('sha256', trim($token));
         $now = new DateTimeImmutable('now');
 
-        $result = $this->database->transaction(function (PDO $pdo) use ($tokenHash, $passwordHash, $now): ?array {
+        $result = $this->database->transaction(function (PDO $pdo) use ($tokenHash, $passwordHash, $now): bool {
             $statement = $pdo->prepare(
                 'SELECT prt.id, prt.user_id, u.public_id AS user_public_id
                  FROM password_reset_tokens prt
@@ -232,7 +261,7 @@ final class AccountSecurityService
             $statement->execute(['token_hash' => $tokenHash, 'now' => $now->format('Y-m-d H:i:s')]);
             $record = $statement->fetch();
             if (!$record) {
-                return null;
+                return false;
             }
 
             $sessions = $pdo->prepare('SELECT session_public_id FROM auth_sessions WHERE user_id = :user_id AND revoked_at IS NULL FOR UPDATE');
@@ -265,30 +294,42 @@ final class AccountSecurityService
                 'updated_at' => $now->format('Y-m-d H:i:s'),
                 'user_id' => $record['user_id'],
             ]);
-            return [
-                'user_id' => (int) $record['user_id'],
-                'user_public_id' => (string) $record['user_public_id'],
-                'session_public_ids' => $sessionPublicIds,
-            ];
+            foreach ($sessionPublicIds as $sessionPublicId) {
+                $requestId = $this->audit->sessionEvent(
+                    'revoked',
+                    $sessionPublicId,
+                    (int) $record['user_id'],
+                    '',
+                    '',
+                    ['reason' => 'password_reset']
+                );
+                $this->audit->record(
+                    'auth.session.revoked',
+                    'success',
+                    (int) $record['user_id'],
+                    null,
+                    'auth_session',
+                    $sessionPublicId,
+                    ['reason' => 'password_reset'],
+                    $requestId
+                );
+            }
+            $this->audit->record(
+                'auth.password_reset.completed',
+                'success',
+                (int) $record['user_id'],
+                null,
+                'user',
+                (string) $record['user_public_id'],
+                ['revoked_sessions' => count($sessionPublicIds)]
+            );
+            return true;
         });
 
-        if ($result === null) {
+        if (!$result) {
             $this->audit->record('auth.password_reset.completed', 'denied', null, null, 'password_reset', null, ['reason' => 'invalid_expired_or_replayed']);
-            return false;
         }
-        foreach ($result['session_public_ids'] as $sessionPublicId) {
-            $this->audit->sessionEvent('revoked', $sessionPublicId, $result['user_id'], '', '', ['reason' => 'password_reset']);
-        }
-        $this->audit->record(
-            'auth.password_reset.completed',
-            'success',
-            $result['user_id'],
-            null,
-            'user',
-            $result['user_public_id'],
-            ['revoked_sessions' => count($result['session_public_ids'])]
-        );
-        return true;
+        return $result;
     }
 
     private function sendVerificationEmail(string $email, string $displayName, string $token): void
