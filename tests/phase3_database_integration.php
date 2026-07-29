@@ -8,7 +8,23 @@ use Throwable;
 use Vp3\Database;
 use Vp3\Licensing\DomainLicenseBundleService;
 
-require dirname(__DIR__) . '/bootstrap.php';
+$projectRoot = dirname(__DIR__);
+$autoload = $projectRoot . '/vendor/autoload.php';
+if (is_file($autoload)) {
+    require $autoload;
+} else {
+    spl_autoload_register(static function (string $class) use ($projectRoot): void {
+        $prefix = 'Vp3\\';
+        if (!str_starts_with($class, $prefix)) {
+            return;
+        }
+
+        $path = $projectRoot . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+        if (is_file($path)) {
+            require $path;
+        }
+    });
+}
 
 $dsn = getenv('VP3_TEST_DSN') ?: '';
 $username = getenv('VP3_TEST_DB_USER') ?: 'root';
