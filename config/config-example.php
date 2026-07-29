@@ -66,4 +66,11 @@ return [
         'secret_encryption_key_base64' => getenv('PROVIDER_SECRET_ENCRYPTION_KEY_B64') ?: '',
         'secret_encryption_key_id' => getenv('PROVIDER_SECRET_ENCRYPTION_KEY_ID') ?: 'provider-aes256gcm-v1',
     ],
+    'operations' => [
+        'notification_driver' => getenv('VP3_OPERATIONS_NOTIFICATION_DRIVER') ?: 'null',
+        'secret_encryption_key_base64' => getenv('OPERATIONS_SECRET_ENCRYPTION_KEY_B64') ?: '',
+        'secret_encryption_key_id' => getenv('OPERATIONS_SECRET_ENCRYPTION_KEY_ID') ?: 'operations-aes256gcm-v1',
+        'pod_offline_after_minutes' => max(1, (int) (getenv('OPERATIONS_POD_OFFLINE_AFTER_MINUTES') ?: 10)),
+        'homeserver_offline_after_minutes' => max(1, (int) (getenv('OPERATIONS_HOMESERVER_OFFLINE_AFTER_MINUTES') ?: 10)),
+    ],
 ];

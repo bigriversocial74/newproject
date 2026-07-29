@@ -27,6 +27,13 @@ use Vp3\Infrastructure\NullInfrastructureProviderAdapter;
 use Vp3\Infrastructure\ProviderSecretCipher;
 use Vp3\Licensing\DomainLicenseBundleService;
 use Vp3\Licensing\LicenseLifecycleService;
+use Vp3\Operations\NullOperationalNotificationAdapter;
+use Vp3\Operations\OperationalAuditService;
+use Vp3\Operations\OperationalIncidentService;
+use Vp3\Operations\OperationalNotificationService;
+use Vp3\Operations\OperationsMonitorService;
+use Vp3\Operations\OperationsReadinessService;
+use Vp3\Operations\OperationsSecretCipher;
 use Vp3\Provisioning\NullPodProvisioningAdapter;
 use Vp3\Provisioning\PodProvisioningService;
 use Vp3\Provisioning\ProtectedConfigurationMerger;
@@ -110,6 +117,38 @@ $infrastructure = new InfrastructureProviderService(
     $infrastructureProviderAdapter,
     $infrastructureProviderAdapter
 );
+$operationsConfig = (array) ($config['operations'] ?? []);
+$operationsSecretCipher = new OperationsSecretCipher(
+    (string) ($operationsConfig['secret_encryption_key_base64'] ?? getenv('OPERATIONS_SECRET_ENCRYPTION_KEY_B64') ?: ''),
+    (string) ($operationsConfig['secret_encryption_key_id'] ?? getenv('OPERATIONS_SECRET_ENCRYPTION_KEY_ID') ?: 'operations-aes256gcm-v1')
+);
+$operationalNotificationAdapter = new NullOperationalNotificationAdapter();
+$operationalAudit = new OperationalAuditService($database);
+$operationalNotifications = new OperationalNotificationService(
+    $database,
+    $operationsSecretCipher,
+    $operationalNotificationAdapter,
+    $operationalAudit
+);
+$operationalIncidents = new OperationalIncidentService(
+    $database,
+    $operationalAudit,
+    $operationalNotifications
+);
+$operationsMonitor = new OperationsMonitorService(
+    $database,
+    $operationalIncidents,
+    $operationalAudit,
+    (int) ($operationsConfig['pod_offline_after_minutes'] ?? 10),
+    (int) ($operationsConfig['homeserver_offline_after_minutes'] ?? 10)
+);
+$operations = new OperationsReadinessService(
+    $database,
+    $operationalAudit,
+    $operationalNotifications,
+    $operationalIncidents,
+    $operationsMonitor
+);
 $session = new SessionManager(['name' => (string) $config['app']['session_name'], 'secure' => (bool) $config['app']['session_secure']]);
 
 return [
@@ -143,5 +182,12 @@ return [
     'provider_secret_cipher' => $providerSecretCipher,
     'infrastructure_provider_adapter' => $infrastructureProviderAdapter,
     'infrastructure' => $infrastructure,
+    'operations_secret_cipher' => $operationsSecretCipher,
+    'operational_notification_adapter' => $operationalNotificationAdapter,
+    'operational_audit' => $operationalAudit,
+    'operational_notifications' => $operationalNotifications,
+    'operational_incidents' => $operationalIncidents,
+    'operations_monitor' => $operationsMonitor,
+    'operations' => $operations,
     'session' => $session,
 ];
