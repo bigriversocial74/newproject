@@ -14,10 +14,14 @@ use Vp3\Billing\StripeWebhookService;
 use Vp3\Billing\SubscriptionLifecycleService;
 use Vp3\Catalog\PlanCatalogService;
 use Vp3\Database;
+use Vp3\Deployments\PodHealthService;
 use Vp3\DomainCodes\DomainRegistryService;
 use Vp3\Http\SessionManager;
 use Vp3\Licensing\DomainLicenseBundleService;
 use Vp3\Licensing\LicenseLifecycleService;
+use Vp3\Provisioning\NullPodProvisioningAdapter;
+use Vp3\Provisioning\PodProvisioningService;
+use Vp3\Provisioning\ProtectedConfigurationMerger;
 
 $autoload = __DIR__ . '/vendor/autoload.php';
 if (!is_file($autoload)) {
@@ -62,6 +66,14 @@ $stripeCatalog = new StripeCatalogService($database);
 $stripeCheckout = new StripeCheckoutService($database, $stripeGateway);
 $stripeWebhooks = new StripeWebhookService($database, $stripeSignatureVerifier, (int) $config['stripe']['grace_days']);
 $billingGrace = new BillingGraceService($database);
+$podProvisioningAdapter = new NullPodProvisioningAdapter();
+$podProvisioning = new PodProvisioningService(
+    $database,
+    $podProvisioningAdapter,
+    new ProtectedConfigurationMerger(),
+    (array) $config['provisioning']['protected_configuration_paths']
+);
+$podHealth = new PodHealthService($database);
 $session = new SessionManager([
     'name' => (string) $config['app']['session_name'],
     'secure' => (bool) $config['app']['session_secure'],
@@ -83,5 +95,8 @@ return [
     'stripe_checkout' => $stripeCheckout,
     'stripe_webhooks' => $stripeWebhooks,
     'billing_grace' => $billingGrace,
+    'pod_provisioning_adapter' => $podProvisioningAdapter,
+    'pod_provisioning' => $podProvisioning,
+    'pod_health' => $podHealth,
     'session' => $session,
 ];

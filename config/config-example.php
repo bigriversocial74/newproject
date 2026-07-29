@@ -34,4 +34,11 @@ return [
         'signature_tolerance_seconds' => max(60, (int) (getenv('STRIPE_SIGNATURE_TOLERANCE_SECONDS') ?: 300)),
         'grace_days' => max(1, (int) (getenv('STRIPE_GRACE_DAYS') ?: 7)),
     ],
+    'provisioning' => [
+        'provider_driver' => getenv('VP3_PROVISIONING_DRIVER') ?: 'null',
+        'protected_configuration_paths' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', getenv('VP3_PROTECTED_CONFIGURATION_PATHS') ?: 'database.password,app.key,customer')
+        ))),
+    ],
 ];
