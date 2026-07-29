@@ -41,6 +41,16 @@ foreach (['saveConnection', 'enqueueProvision', 'enqueueReconcile', 'enqueueTear
 foreach (['FOR UPDATE SKIP LOCKED', 'hosting_allocate', 'dns_bind', 'certificate_request', 'certificate_revoke', 'dns_remove', 'hosting_release'] as $contract) {
     $assert(str_contains($service, $contract), 'Missing infrastructure safety contract: ' . $contract);
 }
+$installer = file_get_contents($root . '/database/vp3-single-install.sql') ?: '';
+$assert(str_contains($installer, '20260729_phase9_provider_adapters.sql'), 'Phase 9 migration is missing from the cumulative installer.');
+$config = file_get_contents($root . '/config/config-example.php') ?: '';
+foreach (['PROVIDER_SECRET_ENCRYPTION_KEY_B64', 'PROVIDER_SECRET_ENCRYPTION_KEY_ID', 'VP3_INFRASTRUCTURE_PROVIDER_DRIVER'] as $setting) {
+    $assert(str_contains($config, $setting), 'Missing Phase 9 production configuration: ' . $setting);
+}
+$bootstrap = file_get_contents($root . '/bootstrap.php') ?: '';
+foreach (['ProviderSecretCipher', 'NullInfrastructureProviderAdapter', 'InfrastructureProviderService', "'infrastructure' => $infrastructure"] as $wiring) {
+    $assert(str_contains($bootstrap, $wiring), 'Missing Phase 9 production bootstrap wiring: ' . $wiring);
+}
 if ($failures !== []) {
     fwrite(STDERR, "Phase 9 contract failures:\n- " . implode("\n- ", $failures) . "\n");
     exit(1);
