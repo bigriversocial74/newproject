@@ -1,0 +1,38 @@
+name: Apply Phase 11A Ownership Fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-phase11a-ownership-fix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/vp3-phase-11a-runtime-queue-hardening-20260729'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vp3-phase-11a-runtime-queue-hardening-20260729
+          fetch-depth: 0
+      - name: Apply lease-ownership repair
+        run: |
+          base64 -d .phase11a-ownership-fix/payload.b64 | gzip -d > /tmp/phase11a-ownership.patch
+          git apply --check /tmp/phase11a-ownership.patch
+          git apply /tmp/phase11a-ownership.patch
+          rm -rf .phase11a-ownership-fix
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden stale-worker ownership after provider calls"
+          git push origin HEAD:feature/vp3-phase-11a-runtime-queue-hardening-20260729
