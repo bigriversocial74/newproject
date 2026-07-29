@@ -154,6 +154,14 @@ jobs:
           VP3_TEST_DB_USER: root
           VP3_TEST_DB_PASSWORD: root
         run: php tests/phase11b_database_integration.php
+      - id: post_audit
+        name: Run MySQL 8 Phase 11B post-audit certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase11b_post_audit_database_integration.php
       - name: Publish MySQL stage statuses
         if: always()
         continue-on-error: true
@@ -162,12 +170,14 @@ jobs:
           SCHEMA: ${{ steps.schema.outcome }}
           RETAINED: ${{ steps.retained.outcome }}
           PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
         run: |
           bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/schema" "$SCHEMA" "MySQL 8 schema"
           bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/retained" "$RETAINED" "MySQL 8 retained tests"
           bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/phase11b" "$PHASE11B" "MySQL 8 Phase 11B tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/post-audit" "$POST_AUDIT" "MySQL 8 Phase 11B post-audit"
           aggregate=success
-          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success ]]; then aggregate=failure; fi
+          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success || "$POST_AUDIT" != success ]]; then aggregate=failure; fi
           bash .github/scripts/publish-commit-status.sh "phase11b/mysql8" "$aggregate" "Phase 11B MySQL 8"
       - name: Enforce MySQL certification
         if: always()
@@ -175,10 +185,12 @@ jobs:
           SCHEMA: ${{ steps.schema.outcome }}
           RETAINED: ${{ steps.retained.outcome }}
           PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
         run: |
           [[ "$SCHEMA" == success ]]
           [[ "$RETAINED" == success ]]
           [[ "$PHASE11B" == success ]]
+          [[ "$POST_AUDIT" == success ]]
 
   mariadb1011:
     runs-on: ubuntu-latest
@@ -237,6 +249,14 @@ jobs:
           VP3_TEST_DB_USER: root
           VP3_TEST_DB_PASSWORD: root
         run: php tests/phase11b_database_integration.php
+      - id: post_audit
+        name: Run MariaDB 10.11 Phase 11B post-audit certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase11b_post_audit_database_integration.php
       - name: Publish MariaDB stage statuses
         if: always()
         continue-on-error: true
@@ -245,12 +265,14 @@ jobs:
           SCHEMA: ${{ steps.schema.outcome }}
           RETAINED: ${{ steps.retained.outcome }}
           PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
         run: |
           bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/schema" "$SCHEMA" "MariaDB 10.11 schema"
           bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/retained" "$RETAINED" "MariaDB 10.11 retained tests"
           bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/phase11b" "$PHASE11B" "MariaDB 10.11 Phase 11B tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/post-audit" "$POST_AUDIT" "MariaDB 10.11 Phase 11B post-audit"
           aggregate=success
-          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success ]]; then aggregate=failure; fi
+          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success || "$POST_AUDIT" != success ]]; then aggregate=failure; fi
           bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011" "$aggregate" "Phase 11B MariaDB 10.11"
       - name: Enforce MariaDB certification
         if: always()
@@ -258,7 +280,9 @@ jobs:
           SCHEMA: ${{ steps.schema.outcome }}
           RETAINED: ${{ steps.retained.outcome }}
           PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
         run: |
           [[ "$SCHEMA" == success ]]
           [[ "$RETAINED" == success ]]
           [[ "$PHASE11B" == success ]]
+          [[ "$POST_AUDIT" == success ]]
