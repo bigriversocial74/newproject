@@ -11,7 +11,7 @@ if (!$service instanceof \Vp3\Provisioning\PodProvisioningService) {
 
 $workerId = getenv('VP3_WORKER_ID') ?: (gethostname() . ':' . getmypid());
 $limit = max(1, min(100, (int) (getenv('VP3_WORKER_LIMIT') ?: 25)));
-$service->reconcileBillingOutbox($limit);
+$service->reconcileBillingOutbox($limit, $workerId . ':billing');
 $processed = 0;
 while ($processed < $limit) {
     $result = $service->processNext($workerId);

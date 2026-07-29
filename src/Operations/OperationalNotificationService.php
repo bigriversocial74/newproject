@@ -8,9 +8,13 @@ use PDO;
 use RuntimeException;
 use Throwable;
 use Vp3\Database;
+use Vp3\Queue\QueueLease;
+use Vp3\Queue\QueueLeaseLostException;
 
 final class OperationalNotificationService
 {
+    private readonly QueueLease $queueLease;
+
     /** @var array<string,int> */
     private const SEVERITY_RANK = ['info' => 1, 'warning' => 2, 'critical' => 3];
 
@@ -18,8 +22,10 @@ final class OperationalNotificationService
         private readonly Database $database,
         private readonly OperationsSecretCipher $cipher,
         private readonly OperationalNotificationAdapter $adapter,
-        private readonly OperationalAuditService $audit
+        private readonly OperationalAuditService $audit,
+        int $leaseSeconds = 900
     ) {
+        $this->queueLease = new QueueLease($leaseSeconds);
     }
 
     /** @param array<string,mixed> $destination @return array{channel_id:int,public_id:string} */
@@ -198,30 +204,30 @@ final class OperationalNotificationService
             throw new RuntimeException('An operational notification worker ID is required.');
         }
         $notification = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
-            $pdo->exec(
-                "UPDATE operational_notifications
-                 SET status='queued',locked_at=NULL,locked_by=NULL,available_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP()
-                 WHERE status='running' AND locked_at<DATE_SUB(UTC_TIMESTAMP(),INTERVAL 15 MINUTE)"
-            );
             $claim = $pdo->query(
                 "SELECT n.*,i.public_id AS incident_public_id,i.account_scope,i.title,
                         c.channel_type,c.label,c.destination_ciphertext,c.destination_nonce,c.destination_tag
                  FROM operational_notifications n
                  INNER JOIN operational_incidents i ON i.id=n.incident_id
                  INNER JOIN operational_notification_channels c ON c.id=n.channel_id
-                 WHERE n.status='queued' AND n.available_at<=UTC_TIMESTAMP() AND c.status='active'
+                 WHERE (n.status='queued' OR (n.status='running' AND (n.locked_until IS NULL OR n.locked_until<UTC_TIMESTAMP())))
+                   AND n.available_at<=UTC_TIMESTAMP() AND c.status='active'
                  ORDER BY n.id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
             );
             $row = $claim->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE operational_notifications
-                 SET status='running',attempts=attempts+1,locked_at=UTC_TIMESTAMP(),locked_by=:worker,updated_at=UTC_TIMESTAMP()
+                 SET status='running',attempts=attempts+1,locked_at=UTC_TIMESTAMP(),locked_by=:worker,
+                     locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,updated_at=UTC_TIMESTAMP()
                  WHERE id=:id"
-            )->execute(['worker' => substr($workerId, 0, 128), 'id' => (int) $row['id']]);
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => (int) $row['id']]);
             $row['attempts'] = (int) $row['attempts'] + 1;
+            $row['lease_token'] = $token;
             return $row;
         });
         if ($notification === null) {
@@ -229,6 +235,7 @@ final class OperationalNotificationService
         }
 
         try {
+            $this->queueLease->renew($this->database->pdo(), 'operational_notifications', (int) $notification['id'], (string) $notification['lease_token']);
             $context = $this->channelContext(
                 (int) $notification['account_scope'],
                 (string) $notification['channel_type'],
@@ -253,31 +260,42 @@ final class OperationalNotificationService
                 'payload_hash' => (string) $notification['payload_hash'],
             ];
             $responseHash = $this->hashValue($this->adapter->deliver($destination, $payload));
+            $this->queueLease->renew($this->database->pdo(), 'operational_notifications', (int) $notification['id'], (string) $notification['lease_token']);
             $receiptHash = hash('sha256', $notification['delivery_key'] . '|delivered|' . $responseHash);
             $this->database->transaction(function (PDO $pdo) use ($notification, $responseHash, $receiptHash): void {
-                $pdo->prepare(
+                $statement = $pdo->prepare(
                     "UPDATE operational_notifications
-                     SET status='delivered',delivered_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP()
-                     WHERE id=:id"
-                )->execute(['id' => (int) $notification['id']]);
+                     SET status='delivered',delivered_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP()
+                     WHERE id=:id AND lease_token=:token"
+                );
+                $statement->execute(['id' => (int) $notification['id'], 'token' => $notification['lease_token']]);
+                $this->queueLease->assertUpdated($statement);
                 $this->insertNotificationReceipt($pdo, (int) $notification['id'], 'delivered', $receiptHash, $responseHash);
                 $this->audit->appendWithPdo($pdo, 'notification', (int) $notification['id'], 'delivered', 'worker', 0, $receiptHash);
             });
             return ['notification_id' => (int) $notification['id'], 'status' => 'delivered', 'receipt_hash' => $receiptHash];
+        } catch (QueueLeaseLostException) {
+            return ['notification_id' => (int) $notification['id'], 'status' => 'lease_lost', 'receipt_hash' => hash('sha256', $notification['delivery_key'] . '|lease_lost')];
         } catch (Throwable $exception) {
             $errorHash = hash('sha256', $exception::class . '|' . $exception->getMessage());
             $status = (int) $notification['attempts'] >= (int) $notification['max_attempts'] ? 'failed' : 'queued';
             $receiptHash = hash('sha256', $notification['delivery_key'] . '|' . $status . '|' . $errorHash . '|' . $notification['attempts']);
-            $this->database->transaction(function (PDO $pdo) use ($notification, $status, $errorHash, $receiptHash): void {
-                $pdo->prepare(
-                    "UPDATE operational_notifications
-                     SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 5 MINUTE),
-                         locked_at=NULL,locked_by=NULL,last_error_hash=:error,updated_at=UTC_TIMESTAMP()
-                     WHERE id=:id"
-                )->execute(['status' => $status, 'error' => $errorHash, 'id' => (int) $notification['id']]);
-                $this->insertNotificationReceipt($pdo, (int) $notification['id'], 'failed', $receiptHash, $errorHash);
-                $this->audit->appendWithPdo($pdo, 'notification', (int) $notification['id'], $status, 'worker', 0, $receiptHash);
-            });
+            try {
+                $this->database->transaction(function (PDO $pdo) use ($notification, $status, $errorHash, $receiptHash): void {
+                    $statement = $pdo->prepare(
+                        "UPDATE operational_notifications
+                         SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 5 MINUTE),
+                             locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_hash=:error,updated_at=UTC_TIMESTAMP()
+                         WHERE id=:id AND lease_token=:token"
+                    );
+                    $statement->execute(['status' => $status, 'error' => $errorHash, 'id' => (int) $notification['id'], 'token' => $notification['lease_token']]);
+                    $this->queueLease->assertUpdated($statement);
+                    $this->insertNotificationReceipt($pdo, (int) $notification['id'], 'failed', $receiptHash, $errorHash);
+                    $this->audit->appendWithPdo($pdo, 'notification', (int) $notification['id'], $status, 'worker', 0, $receiptHash);
+                });
+            } catch (QueueLeaseLostException) {
+                return ['notification_id' => (int) $notification['id'], 'status' => 'lease_lost', 'receipt_hash' => hash('sha256', $notification['delivery_key'] . '|lease_lost')];
+            }
             return ['notification_id' => (int) $notification['id'], 'status' => $status, 'receipt_hash' => $receiptHash];
         }
     }

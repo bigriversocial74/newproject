@@ -62,7 +62,7 @@ foreach (['FOR UPDATE SKIP LOCKED', 'event_status', 'monitor_managed', 'appendWi
     $assert(str_contains($combined, $contract), 'Missing Phase 10 reliability contract: ' . $contract);
 }
 $assert(str_contains($notificationService, "'status' => (string) \$notification['event_status']"), 'Notification payload does not use immutable queued event status.');
-$assert(str_contains($notificationService, "locked_at<DATE_SUB(UTC_TIMESTAMP(),INTERVAL 15 MINUTE)"), 'Stale notification claims are not recovered.');
+$assert(str_contains($notificationService, 'locked_until') && str_contains($notificationService, 'lease_token'), 'Expiring token-owned notification claims are not enforced.');
 $infrastructureService = file_get_contents($root . '/src/Infrastructure/InfrastructureProviderService.php') ?: '';
 $assert(str_contains($infrastructureService, 'Infrastructure provider verification failed for stage:'), 'Retained Phase 9 provider verification enforcement is missing.');
 
@@ -73,7 +73,7 @@ foreach (['OPERATIONS_SECRET_ENCRYPTION_KEY_B64', 'OPERATIONS_SECRET_ENCRYPTION_
     $assert(str_contains($config, $setting), 'Missing Phase 10 production configuration: ' . $setting);
 }
 $bootstrap = file_get_contents($root . '/bootstrap.php') ?: '';
-foreach (['OperationsSecretCipher', 'NullOperationalNotificationAdapter', 'OperationsReadinessService', "'operations' => \$operations"] as $wiring) {
+foreach (['OperationsSecretCipher', 'AdapterFactory::notifications', 'OperationsReadinessService', "'operations' => \$operations"] as $wiring) {
     $assert(str_contains($bootstrap, $wiring), 'Missing Phase 10 bootstrap wiring: ' . $wiring);
 }
 

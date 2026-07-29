@@ -8,9 +8,13 @@ use PDO;
 use RuntimeException;
 use Throwable;
 use Vp3\Database;
+use Vp3\Queue\QueueLease;
+use Vp3\Queue\QueueLeaseLostException;
 
 final class InfrastructureProviderService
 {
+    private readonly QueueLease $queueLease;
+
     /** @var array<string,list<string>> */
     private const STAGES = [
         'provision' => ['hosting_allocate', 'dns_bind', 'certificate_request', 'verify', 'active'],
@@ -23,8 +27,10 @@ final class InfrastructureProviderService
         private readonly ProviderSecretCipher $cipher,
         private readonly HostingProviderAdapter $hosting,
         private readonly DnsProviderAdapter $dns,
-        private readonly CertificateProviderAdapter $certificates
+        private readonly CertificateProviderAdapter $certificates,
+        int $leaseSeconds = 900
     ) {
+        $this->queueLease = new QueueLease($leaseSeconds);
     }
 
     /** @param array<string,mixed> $authContext @return array{connection_id:int,connection_public_id:string,credential_version:int} */
@@ -190,17 +196,23 @@ final class InfrastructureProviderService
         }
         $operation = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
             $row = $pdo->query(
-                "SELECT * FROM provider_operations WHERE status='queued' AND available_at<=UTC_TIMESTAMP()
-                 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                "SELECT * FROM provider_operations WHERE
+                 (status='queued' OR (status IN ('running','hosting','dns','certificate','verifying')
+                  AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
+                 AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
             )->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE provider_operations SET status='running',attempts=attempts+1,locked_at=UTC_TIMESTAMP(),locked_by=:worker,
+                 locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,
                  started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['worker' => $workerId, 'id' => $row['id']]);
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $row['id']]);
             $row['attempts'] = (int) $row['attempts'] + 1;
+            $row['lease_token'] = $token;
             return $row;
         });
         if ($operation === null) {
@@ -348,15 +360,18 @@ final class InfrastructureProviderService
             }
             $stage = (string) $step['stage'];
             try {
+                $this->queueLease->renew($pdo, 'provider_operations', (int) $operation['id'], (string) $operation['lease_token'], ['running','hosting','dns','certificate','verifying']);
                 $status = str_starts_with($stage, 'hosting') ? 'hosting'
                     : (str_starts_with($stage, 'dns') ? 'dns'
                     : (str_starts_with($stage, 'certificate') ? 'certificate'
                     : ($stage === 'verify' ? 'verifying' : 'running')));
-                $pdo->prepare('UPDATE provider_operations SET status=:status,current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id')
-                    ->execute(['status' => $status, 'stage' => $stage, 'id' => $operation['id']]);
+                $statement = $pdo->prepare('UPDATE provider_operations SET status=:status,current_stage=:stage,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token');
+                $statement->execute(['status' => $status, 'stage' => $stage, 'id' => $operation['id'], 'token' => $operation['lease_token']]);
+                $this->queueLease->assertUpdated($statement);
                 $pdo->prepare("UPDATE provider_operation_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id")
                     ->execute(['id' => $step['id']]);
                 $result = $this->executeStage($pdo, $stage, $binding, $deploymentRow, $auth);
+                $this->queueLease->renew($pdo, 'provider_operations', (int) $operation['id'], (string) $operation['lease_token'], ['running','hosting','dns','certificate','verifying']);
                 if (in_array($stage, ['hosting_verify', 'dns_verify', 'certificate_verify'], true)
                     && ($result['verified'] ?? false) !== true) {
                     throw new RuntimeException('Infrastructure provider verification failed for stage: ' . $stage);
@@ -366,6 +381,8 @@ final class InfrastructureProviderService
                     ->execute(['hash' => $hash, 'id' => $step['id']]);
                 $this->receipt($pdo, (int) $operation['account_id'], (int) $operation['id'], (int) $binding['id'], (string) $operation['request_id'], $stage, 'success', $hash, $this->safeMetadata($result));
                 $binding = $this->binding($pdo, (int) $operation['account_id'], (int) $operation['binding_id'], false);
+            } catch (QueueLeaseLostException) {
+                return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
             } catch (Throwable $exception) {
                 $pdo->prepare("UPDATE provider_operation_steps SET status='failed',last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id")
                     ->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $step['id']]);
@@ -373,8 +390,15 @@ final class InfrastructureProviderService
                 return $this->fail($operation, $exception);
             }
         }
-        $pdo->prepare("UPDATE provider_operations SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-            ->execute(['id' => $operation['id']]);
+        $this->queueLease->renew($pdo, 'provider_operations', (int) $operation['id'], (string) $operation['lease_token'], ['running','hosting','dns','certificate','verifying']);
+        $statement = $pdo->prepare(
+            "UPDATE provider_operations SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,
+             locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+        );
+        $statement->execute(['id' => $operation['id'], 'token' => $operation['lease_token']]);
+        if ($statement->rowCount() !== 1) {
+            return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
+        }
         return ['operation_id' => (int) $operation['id'], 'binding_id' => (int) $binding['id'], 'status' => 'completed', 'operation_type' => $operation['operation_type']];
     }
 
@@ -621,15 +645,21 @@ final class InfrastructureProviderService
     private function fail(array $operation, Throwable $exception): array
     {
         $status = (int) $operation['attempts'] < (int) $operation['max_attempts'] ? 'queued' : 'failed';
-        $this->database->pdo()->prepare(
+        $statement = $this->database->pdo()->prepare(
             "UPDATE provider_operations SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
-             locked_at=NULL,locked_by=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-        )->execute([
+             locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,
+             updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+        );
+        $statement->execute([
             'status' => $status,
             'code' => substr($exception::class, 0, 100),
             'message' => substr($exception->getMessage(), 0, 1000),
             'id' => $operation['id'],
+            'token' => $operation['lease_token'],
         ]);
+        if ($statement->rowCount() !== 1) {
+            return ['operation_id' => (int) $operation['id'], 'status' => 'lease_lost'];
+        }
         $this->database->pdo()->prepare("UPDATE infrastructure_bindings SET status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
             ->execute(['id' => $operation['binding_id']]);
         return ['operation_id' => (int) $operation['id'], 'status' => $status, 'error' => $exception->getMessage()];
@@ -747,7 +777,7 @@ final class InfrastructureProviderService
         }
         $marks = implode(',', array_fill(0, count($allowed), '?'));
         $statement = $this->database->pdo()->prepare(
-            "UPDATE provider_operations SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP()
+            "UPDATE provider_operations SET status=?,request_id=?,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP()
              WHERE id=? AND account_id=? AND status IN ({$marks})"
         );
         $statement->execute(array_merge([$next, $requestId, $operationId, $accountId], $allowed));

@@ -5,7 +5,7 @@ declare(strict_types=1);
 return [
     'app' => [
         'name' => 'VP3.me',
-        'env' => getenv('APP_ENV') ?: 'production',
+        'env' => getenv('APP_ENV') ?: 'development',
         'base_url' => rtrim((string) (getenv('APP_BASE_URL') ?: 'https://vp3.me'), '/'),
         'session_name' => getenv('APP_SESSION_NAME') ?: 'vp3_session',
         'session_secure' => filter_var(getenv('APP_SESSION_SECURE') ?: '1', FILTER_VALIDATE_BOOL),
@@ -65,6 +65,9 @@ return [
         'provider_driver' => getenv('VP3_INFRASTRUCTURE_PROVIDER_DRIVER') ?: 'null',
         'secret_encryption_key_base64' => getenv('PROVIDER_SECRET_ENCRYPTION_KEY_B64') ?: '',
         'secret_encryption_key_id' => getenv('PROVIDER_SECRET_ENCRYPTION_KEY_ID') ?: 'provider-aes256gcm-v1',
+    ],
+    'queue' => [
+        'lease_seconds' => (int) (getenv('VP3_QUEUE_LEASE_SECONDS') ?: 900),
     ],
     'operations' => [
         'notification_driver' => getenv('VP3_OPERATIONS_NOTIFICATION_DRIVER') ?: 'null',

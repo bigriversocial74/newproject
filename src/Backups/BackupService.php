@@ -8,16 +8,22 @@ use PDO;
 use RuntimeException;
 use Throwable;
 use Vp3\Database;
+use Vp3\Queue\QueueLease;
+use Vp3\Queue\QueueLeaseLostException;
 
 final class BackupService
 {
+    private readonly QueueLease $queueLease;
+
     public function __construct(
         private readonly Database $database,
         private readonly BackupProviderAdapter $adapter,
         private readonly BackupMetadataCipher $cipher,
         private readonly float $warningThreshold = 80.0,
-        private readonly float $criticalThreshold = 95.0
+        private readonly float $criticalThreshold = 95.0,
+        int $leaseSeconds = 900
     ) {
+        $this->queueLease = new QueueLease($leaseSeconds);
     }
 
     /** @return array{policy_id:int,policy_public_id:string} */
@@ -195,17 +201,22 @@ final class BackupService
         }
         $job = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
             $row = $pdo->query(
-                "SELECT * FROM backup_jobs WHERE status IN ('queued','running') AND available_at<=UTC_TIMESTAMP()
-                 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                "SELECT * FROM backup_jobs WHERE
+                 (status='queued' OR (status IN ('running','creating','verifying') AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
+                 AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
             )->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE backup_jobs SET status='running',attempts=attempts+1,locked_at=UTC_TIMESTAMP(),locked_by=:worker,
+                 locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,
                  started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['worker' => $workerId, 'id' => $row['id']]);
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $row['id']]);
             $row['attempts'] = (int) $row['attempts'] + 1;
+            $row['lease_token'] = $token;
             return $row;
         });
         if ($job === null) {
@@ -261,16 +272,22 @@ final class BackupService
         }
         $job = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
             $row = $pdo->query(
-                "SELECT * FROM restore_jobs WHERE status IN ('queued','running') AND available_at<=UTC_TIMESTAMP()
-                 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                "SELECT * FROM restore_jobs WHERE
+                 (status='queued' OR (status IN ('running','validating','restoring','verifying') AND (locked_until IS NULL OR locked_until<UTC_TIMESTAMP())))
+                 AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
             )->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 return null;
             }
+            $token = $this->queueLease->token();
+            $seconds = $this->queueLease->seconds();
             $pdo->prepare(
                 "UPDATE restore_jobs SET status='running',attempts=attempts+1,locked_at=UTC_TIMESTAMP(),locked_by=:worker,
+                 locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL {$seconds} SECOND),lease_token=:token,
                  started_at=COALESCE(started_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['worker' => $workerId, 'id' => $row['id']]);
+            )->execute(['worker' => substr($workerId, 0, 128), 'token' => $token, 'id' => $row['id']]);
+            $row['attempts'] = (int) $row['attempts'] + 1;
+            $row['lease_token'] = $token;
             return $row;
         });
         if ($job === null) {
@@ -278,8 +295,10 @@ final class BackupService
         }
         $pdo = $this->database->pdo();
         try {
-            $pdo->prepare("UPDATE restore_jobs SET status='validating',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $this->queueLease->renew($pdo, 'restore_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','validating','restoring','verifying']);
+            $statement = $pdo->prepare("UPDATE restore_jobs SET status='validating',updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $snapshot = $this->snapshot($pdo, (int) $job['account_id'], (int) $job['snapshot_id'], true);
             if ($snapshot['status'] !== 'verified' || $snapshot['verification_status'] !== 'verified') {
                 throw new RuntimeException('Snapshot lost verified status before restore.');
@@ -287,22 +306,31 @@ final class BackupService
             $targetId = $snapshot['target_type'] === 'pod' ? (int) $snapshot['pod_deployment_id'] : (int) $snapshot['homeserver_device_id'];
             $target = $this->target($pdo, (int) $job['account_id'], (string) $snapshot['target_type'], $targetId, false);
             $reference = $this->decryptReference($snapshot);
-            $pdo->prepare("UPDATE restore_jobs SET status='restoring',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $statement = $pdo->prepare("UPDATE restore_jobs SET status='restoring',updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $result = $this->adapter->restoreBackup($target, $reference, (string) $snapshot['snapshot_hash']);
+            $this->queueLease->renew($pdo, 'restore_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','validating','restoring','verifying']);
             $verificationHash = strtolower(trim((string) ($result['verification_hash'] ?? '')));
             if (($result['restored'] ?? false) !== true || !preg_match('/^[a-f0-9]{64}$/', $verificationHash)) {
                 throw new RuntimeException('Provider did not verify the restored snapshot.');
             }
-            $pdo->prepare("UPDATE restore_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $statement = $pdo->prepare("UPDATE restore_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $this->receipt($pdo, (int) $job['account_id'], null, (int) $job['id'], (int) $snapshot['id'], (string) $job['request_id'], 'restore_verified', 'success', $verificationHash, $this->safeMetadata($result));
             return ['restore_job_id' => (int) $job['id'], 'snapshot_id' => (int) $snapshot['id'], 'status' => 'completed'];
+        } catch (QueueLeaseLostException) {
+            return ['restore_job_id' => (int) $job['id'], 'status' => 'lease_lost'];
         } catch (Throwable $exception) {
-            $pdo->prepare(
-                "UPDATE restore_jobs SET status='failed',locked_at=NULL,locked_by=NULL,last_error_code=:code,
-                 last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $job['id']]);
+            $statement = $pdo->prepare(
+                "UPDATE restore_jobs SET status='failed',locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,
+                 last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+            );
+            $statement->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $job['id'], 'token' => $job['lease_token']]);
+            if ($statement->rowCount() !== 1) {
+                return ['restore_job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+            }
             $this->receipt($pdo, (int) $job['account_id'], null, (int) $job['id'], (int) $job['snapshot_id'], (string) $job['request_id'], 'restore_failed', 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
             return ['restore_job_id' => (int) $job['id'], 'status' => 'failed', 'error' => $exception->getMessage()];
         }
@@ -438,9 +466,12 @@ final class BackupService
         $targetId = $job['target_type'] === 'pod' ? (int) $job['pod_deployment_id'] : (int) $job['homeserver_device_id'];
         $target = $this->target($pdo, (int) $job['account_id'], (string) $job['target_type'], $targetId, false);
         try {
-            $pdo->prepare("UPDATE backup_jobs SET status='creating',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $this->queueLease->renew($pdo, 'backup_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','creating','verifying']);
+            $statement = $pdo->prepare("UPDATE backup_jobs SET status='creating',updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $created = $this->adapter->createBackup($target, (string) $job['job_type']);
+            $this->queueLease->renew($pdo, 'backup_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','creating','verifying']);
             $reference = trim((string) ($created['reference'] ?? ''));
             $snapshotHash = strtolower(trim((string) ($created['snapshot_hash'] ?? '')));
             $size = (int) ($created['size_bytes'] ?? -1);
@@ -480,9 +511,11 @@ final class BackupService
                 'retention_days' => $retentionDays,
             ]);
             $snapshotId = (int) $pdo->lastInsertId();
-            $pdo->prepare("UPDATE backup_jobs SET status='verifying',updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $statement = $pdo->prepare("UPDATE backup_jobs SET status='verifying',updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $verified = $this->adapter->verifyBackup($target, $reference, $snapshotHash);
+            $this->queueLease->renew($pdo, 'backup_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','creating','verifying']);
             $verificationHash = strtolower(trim((string) ($verified['verification_hash'] ?? '')));
             if (($verified['verified'] ?? false) !== true || !preg_match('/^[a-f0-9]{64}$/', $verificationHash)) {
                 $pdo->prepare("UPDATE backup_snapshots SET status='failed',verification_status='failed',updated_at=UTC_TIMESTAMP() WHERE id=:id")
@@ -501,25 +534,33 @@ final class BackupService
             ]);
             $pdo->prepare("UPDATE backup_snapshots SET status='verified',verification_status='verified',verified_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
                 ->execute(['id' => $snapshotId]);
-            $pdo->prepare("UPDATE backup_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $statement = $pdo->prepare("UPDATE backup_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], null, $snapshotId, (string) $job['request_id'], 'backup_verified', 'success', $verificationHash, [
                 'snapshot_public_id' => $publicId,
                 'snapshot_hash' => $snapshotHash,
                 'size_bytes' => $size,
             ]);
             return ['job_id' => (int) $job['id'], 'snapshot_id' => $snapshotId, 'snapshot_public_id' => $publicId, 'status' => 'completed'];
+        } catch (QueueLeaseLostException) {
+            return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
         } catch (Throwable $exception) {
             $status = (int) $job['attempts'] < (int) $job['max_attempts'] ? 'queued' : 'failed';
-            $pdo->prepare(
+            $statement = $pdo->prepare(
                 "UPDATE backup_jobs SET status=:status,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 60 SECOND),
-                 locked_at=NULL,locked_by=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute([
+                 locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+            );
+            $statement->execute([
                 'status' => $status,
                 'code' => substr($exception::class, 0, 100),
                 'message' => substr($exception->getMessage(), 0, 1000),
                 'id' => $job['id'],
+                'token' => $job['lease_token'],
             ]);
+            if ($statement->rowCount() !== 1) {
+                return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+            }
             $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], null, null, (string) $job['request_id'], 'backup_failed', 'failure', null, ['error' => substr($exception->getMessage(), 0, 500)]);
             return ['job_id' => (int) $job['id'], 'status' => $status, 'error' => $exception->getMessage()];
         }
@@ -530,13 +571,15 @@ final class BackupService
     {
         $pdo = $this->database->pdo();
         try {
+            $this->queueLease->renew($pdo, 'backup_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','creating','verifying']);
             if ($job['snapshot_id'] === null) {
                 throw new RuntimeException('Retention deletion job has no snapshot.');
             }
             $snapshot = $this->snapshot($pdo, (int) $job['account_id'], (int) $job['snapshot_id'], true);
             if ($snapshot['status'] === 'deleted') {
-                $pdo->prepare("UPDATE backup_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                    ->execute(['id' => $job['id']]);
+                $statement = $pdo->prepare("UPDATE backup_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+                $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+                $this->queueLease->assertUpdated($statement);
                 return ['job_id' => (int) $job['id'], 'snapshot_id' => (int) $snapshot['id'], 'status' => 'completed', 'replayed' => true];
             }
             if ($snapshot['status'] !== 'expired') {
@@ -546,21 +589,29 @@ final class BackupService
             $target = $this->target($pdo, (int) $job['account_id'], (string) $snapshot['target_type'], $targetId, false);
             $reference = $this->decryptReference($snapshot);
             $result = $this->adapter->deleteBackup($target, $reference, (string) $snapshot['snapshot_hash']);
+            $this->queueLease->renew($pdo, 'backup_jobs', (int) $job['id'], (string) $job['lease_token'], ['running','creating','verifying']);
             $receiptHash = strtolower(trim((string) ($result['receipt_hash'] ?? '')));
             if (($result['deleted'] ?? false) !== true || !preg_match('/^[a-f0-9]{64}$/', $receiptHash)) {
                 throw new RuntimeException('Provider did not verify snapshot deletion.');
             }
             $pdo->prepare("UPDATE backup_snapshots SET status='deleted',deleted_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id")
                 ->execute(['id' => $snapshot['id']]);
-            $pdo->prepare("UPDATE backup_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id")
-                ->execute(['id' => $job['id']]);
+            $statement = $pdo->prepare("UPDATE backup_jobs SET status='completed',completed_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token");
+            $statement->execute(['id' => $job['id'], 'token' => $job['lease_token']]);
+            $this->queueLease->assertUpdated($statement);
             $this->receipt($pdo, (int) $job['account_id'], (int) $job['id'], null, (int) $snapshot['id'], (string) $job['request_id'], 'retention_deleted', 'success', $receiptHash, null);
             return ['job_id' => (int) $job['id'], 'snapshot_id' => (int) $snapshot['id'], 'status' => 'completed'];
+        } catch (QueueLeaseLostException) {
+            return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
         } catch (Throwable $exception) {
-            $pdo->prepare(
-                "UPDATE backup_jobs SET status='failed',locked_at=NULL,locked_by=NULL,last_error_code=:code,
-                 last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-            )->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $job['id']]);
+            $statement = $pdo->prepare(
+                "UPDATE backup_jobs SET status='failed',locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error_code=:code,
+                 last_error_message=:message,updated_at=UTC_TIMESTAMP() WHERE id=:id AND lease_token=:token"
+            );
+            $statement->execute(['code' => substr($exception::class, 0, 100), 'message' => substr($exception->getMessage(), 0, 1000), 'id' => $job['id'], 'token' => $job['lease_token']]);
+            if ($statement->rowCount() !== 1) {
+                return ['job_id' => (int) $job['id'], 'status' => 'lease_lost'];
+            }
             return ['job_id' => (int) $job['id'], 'status' => 'failed', 'error' => $exception->getMessage()];
         }
     }
