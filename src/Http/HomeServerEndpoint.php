@@ -73,7 +73,7 @@ final class HomeServerEndpoint
     public static function accountContext(array $container, array $payload): array
     {
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
-        $container['session']->requireCsrf(AuthEndpoint::csrf($payload));
+        $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
         return [
             'account_id' => (int) $current['user']['account_id'],
             'user' => $current['user'],
