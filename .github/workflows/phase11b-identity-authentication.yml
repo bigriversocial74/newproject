@@ -1,0 +1,288 @@
+name: Phase 11B Identity and Authentication Completion
+
+on:
+  push:
+    branches:
+      - main
+      - feature/vp3-phase-11b-identity-completion
+  pull_request:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: phase11b-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - id: platform
+        name: Validate Composer and runtime platform contract
+        continue-on-error: true
+        run: |
+          composer validate --strict --no-check-publish
+          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
+      - id: syntax
+        name: Validate PHP syntax
+        continue-on-error: true
+        run: find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
+      - id: retained
+        name: Run retained static certification
+        continue-on-error: true
+        run: |
+          php tests/run.php
+          php tests/phase3_contract.php
+          php tests/phase4_contract.php
+          php tests/phase5_contract.php
+          php tests/phase6_contract.php
+          php tests/phase7_contract.php
+          php tests/phase8_contract.php
+          php tests/phase9_contract.php
+          php tests/phase10_contract.php
+          php tests/phase11a_contract.php
+          php tests/phase11a_runtime.php
+      - id: phase11b_static
+        name: Run Phase 11B static certification
+        continue-on-error: true
+        run: php tests/phase11b_contract.php
+      - id: phase11b_runtime
+        name: Run Phase 11B runtime certification
+        continue-on-error: true
+        run: php tests/phase11b_runtime.php
+      - name: Publish PHP stage statuses
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ steps.platform.outcome }}
+          SYNTAX: ${{ steps.syntax.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          STATIC: ${{ steps.phase11b_static.outcome }}
+          RUNTIME: ${{ steps.phase11b_runtime.outcome }}
+          VERSION: ${{ matrix.php }}
+        run: |
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/platform" "$PLATFORM" "PHP ${VERSION} platform"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/syntax" "$SYNTAX" "PHP ${VERSION} syntax"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/retained" "$RETAINED" "PHP ${VERSION} retained tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/static" "$STATIC" "PHP ${VERSION} Phase 11B static"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/runtime" "$RUNTIME" "PHP ${VERSION} Phase 11B runtime"
+          aggregate=success
+          if [[ "$PLATFORM" != success || "$SYNTAX" != success || "$RETAINED" != success || "$STATIC" != success || "$RUNTIME" != success ]]; then aggregate=failure; fi
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}" "$aggregate" "Phase 11B PHP ${VERSION}"
+      - name: Enforce PHP certification
+        if: always()
+        env:
+          PLATFORM: ${{ steps.platform.outcome }}
+          SYNTAX: ${{ steps.syntax.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          STATIC: ${{ steps.phase11b_static.outcome }}
+          RUNTIME: ${{ steps.phase11b_runtime.outcome }}
+        run: |
+          [[ "$PLATFORM" == success ]]
+          [[ "$SYNTAX" == success ]]
+          [[ "$RETAINED" == success ]]
+          [[ "$STATIC" == success ]]
+          [[ "$RUNTIME" == success ]]
+
+  mysql8:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: vp3_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+      - id: schema
+        name: Import cumulative schema twice
+        continue-on-error: true
+        working-directory: database
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
+      - id: retained
+        name: Run retained database certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/database-integration.php
+          php tests/phase3_database_integration.php
+          php tests/phase4_database_integration.php
+          php tests/phase5_database_integration.php
+          php tests/phase6_database_integration.php
+          php tests/phase7_database_integration.php
+          php tests/phase8_database_integration.php
+          php tests/phase9_database_integration.php
+          php tests/phase10_database_integration.php
+          php tests/phase11a_database_integration.php
+      - id: phase11b
+        name: Run MySQL 8 Phase 11B certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase11b_database_integration.php
+      - id: post_audit
+        name: Run MySQL 8 Phase 11B post-audit certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase11b_post_audit_database_integration.php
+      - name: Publish MySQL stage statuses
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
+        run: |
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/schema" "$SCHEMA" "MySQL 8 schema"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/retained" "$RETAINED" "MySQL 8 retained tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/phase11b" "$PHASE11B" "MySQL 8 Phase 11B tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/post-audit" "$POST_AUDIT" "MySQL 8 Phase 11B post-audit"
+          aggregate=success
+          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success || "$POST_AUDIT" != success ]]; then aggregate=failure; fi
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8" "$aggregate" "Phase 11B MySQL 8"
+      - name: Enforce MySQL certification
+        if: always()
+        env:
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
+        run: |
+          [[ "$SCHEMA" == success ]]
+          [[ "$RETAINED" == success ]]
+          [[ "$PHASE11B" == success ]]
+          [[ "$POST_AUDIT" == success ]]
+
+  mariadb1011:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: vp3_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, json, mbstring, sodium, openssl
+          coverage: none
+      - name: Install MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+      - id: schema
+        name: Import cumulative schema twice
+        continue-on-error: true
+        working-directory: database
+        run: |
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
+      - id: retained
+        name: Run retained database certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/database-integration.php
+          php tests/phase3_database_integration.php
+          php tests/phase4_database_integration.php
+          php tests/phase5_database_integration.php
+          php tests/phase6_database_integration.php
+          php tests/phase7_database_integration.php
+          php tests/phase8_database_integration.php
+          php tests/phase9_database_integration.php
+          php tests/phase10_database_integration.php
+          php tests/phase11a_database_integration.php
+      - id: phase11b
+        name: Run MariaDB 10.11 Phase 11B certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase11b_database_integration.php
+      - id: post_audit
+        name: Run MariaDB 10.11 Phase 11B post-audit certification
+        continue-on-error: true
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: php tests/phase11b_post_audit_database_integration.php
+      - name: Publish MariaDB stage statuses
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
+        run: |
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/schema" "$SCHEMA" "MariaDB 10.11 schema"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/retained" "$RETAINED" "MariaDB 10.11 retained tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/phase11b" "$PHASE11B" "MariaDB 10.11 Phase 11B tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/post-audit" "$POST_AUDIT" "MariaDB 10.11 Phase 11B post-audit"
+          aggregate=success
+          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success || "$POST_AUDIT" != success ]]; then aggregate=failure; fi
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011" "$aggregate" "Phase 11B MariaDB 10.11"
+      - name: Enforce MariaDB certification
+        if: always()
+        env:
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+          POST_AUDIT: ${{ steps.post_audit.outcome }}
+        run: |
+          [[ "$SCHEMA" == success ]]
+          [[ "$RETAINED" == success ]]
+          [[ "$PHASE11B" == success ]]
+          [[ "$POST_AUDIT" == success ]]

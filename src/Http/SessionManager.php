@@ -8,6 +8,9 @@ use RuntimeException;
 
 final class SessionManager
 {
+    private const APPLICATION_TOKEN_KEY = '_vp3_application_session';
+    private const CSRF_KEY = '_csrf';
+
     /** @param array{name:string,secure:bool} $config */
     public function __construct(private readonly array $config)
     {
@@ -19,6 +22,10 @@ final class SessionManager
             return;
         }
 
+        ini_set('session.use_strict_mode', '1');
+        ini_set('session.use_only_cookies', '1');
+        ini_set('session.cookie_httponly', '1');
+        ini_set('session.cookie_samesite', 'Lax');
         session_name($this->config['name']);
         session_set_cookie_params([
             'lifetime' => 0,
@@ -40,6 +47,7 @@ final class SessionManager
         if (!session_regenerate_id(true)) {
             throw new RuntimeException('Unable to rotate session identifier.');
         }
+        unset($_SESSION[self::CSRF_KEY]);
     }
 
     public function put(string $key, mixed $value): void
@@ -60,13 +68,43 @@ final class SessionManager
         unset($_SESSION[$key]);
     }
 
+    public function setApplicationToken(string $token): void
+    {
+        if ($token === '') {
+            throw new RuntimeException('Application session token is required.');
+        }
+        $this->start();
+        $_SESSION[self::APPLICATION_TOKEN_KEY] = $token;
+    }
+
+    public function applicationToken(): string
+    {
+        $this->start();
+        return is_string($_SESSION[self::APPLICATION_TOKEN_KEY] ?? null)
+            ? (string) $_SESSION[self::APPLICATION_TOKEN_KEY]
+            : '';
+    }
+
+    public function clearApplicationToken(): void
+    {
+        $this->start();
+        unset($_SESSION[self::APPLICATION_TOKEN_KEY]);
+    }
+
     public function destroy(): void
     {
         $this->start();
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $params = session_get_cookie_params();
-            setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+            setcookie(session_name(), '', [
+                'expires' => time() - 42000,
+                'path' => $params['path'],
+                'domain' => $params['domain'],
+                'secure' => $params['secure'],
+                'httponly' => $params['httponly'],
+                'samesite' => $params['samesite'] ?? 'Lax',
+            ]);
         }
         session_destroy();
     }
@@ -74,10 +112,10 @@ final class SessionManager
     public function csrfToken(): string
     {
         $this->start();
-        if (!isset($_SESSION['_csrf'])) {
-            $_SESSION['_csrf'] = bin2hex(random_bytes(32));
+        if (!isset($_SESSION[self::CSRF_KEY]) || !is_string($_SESSION[self::CSRF_KEY])) {
+            $_SESSION[self::CSRF_KEY] = bin2hex(random_bytes(32));
         }
-        return (string) $_SESSION['_csrf'];
+        return (string) $_SESSION[self::CSRF_KEY];
     }
 
     public function assertCsrf(string $token): void
