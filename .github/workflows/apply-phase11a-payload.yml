@@ -1,0 +1,38 @@
+name: Apply Phase 11A Payload
+
+on:
+  push:
+    branches:
+      - feature/vp3-phase-11a-runtime-queue-hardening-20260729
+    paths:
+      - '.phase11a-payload/**'
+      - '.github/workflows/apply-phase11a-payload.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-phase11a-payload
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vp3-phase-11a-runtime-queue-hardening-20260729
+          fetch-depth: 0
+      - name: Apply exact Phase 11A patch
+        run: |
+          cat .phase11a-payload/part-* | base64 -d | gzip -d > /tmp/phase11a.patch
+          git apply --check /tmp/phase11a.patch
+          git apply /tmp/phase11a.patch
+          rm -rf .phase11a-payload
+          rm -f .github/workflows/apply-phase11a-payload.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Build Phase 11A runtime and queue hardening"
+          git push origin HEAD:feature/vp3-phase-11a-runtime-queue-hardening-20260729
