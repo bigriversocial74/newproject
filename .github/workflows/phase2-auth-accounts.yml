@@ -1,0 +1,33 @@
+name: Phase 2 Auth and Accounts
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/vp3-phase-2-auth-accounts-20260728
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.1', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, json, mbstring
+          coverage: none
+      - name: Validate PHP syntax
+        run: find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Run executable tests
+        run: php tests/run.php
+      - name: Validate migration structure
+        run: |
+          grep -q 'CREATE TABLE IF NOT EXISTS accounts' database/migrations/20260728_phase2_auth_accounts.sql
+          grep -q 'CREATE TABLE IF NOT EXISTS users' database/migrations/20260728_phase2_auth_accounts.sql
+          grep -q 'CREATE TABLE IF NOT EXISTS account_users' database/migrations/20260728_phase2_auth_accounts.sql
