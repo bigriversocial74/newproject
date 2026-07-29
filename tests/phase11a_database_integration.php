@@ -168,7 +168,7 @@ final class Phase11AUpdateLeaseAdapter implements SoftwareUpdateAdapter
             $this->pdo->exec(
                 "UPDATE update_jobs SET lease_token='" . str_repeat('e', 64) . "',locked_by='phase11a-update-thief',
                  locked_until=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 10 MINUTE),updated_at=UTC_TIMESTAMP()
-                 WHERE status='downloading' AND locked_by='phase11a-update-loss-worker'"
+                 WHERE status='running' AND current_stage='downloading' AND locked_by='phase11a-update-loss-worker'"
             );
         }
         return $stage === 'verifying' ? ['verified' => true] : ['provider_request_id' => 'phase11a-' . $stage];
@@ -383,11 +383,13 @@ try {
     $assert(($updateRecovered['job_id'] ?? null) === (int) $updateJob['id'] && ($updateRecovered['status'] ?? null) === 'completed', 'Lease-lost update job could not be recovered.');
 
     // Infrastructure provider results cannot create allocation records after lease theft.
-    $deployment = $pdo->query(
+    $deploymentStatement = $pdo->prepare(
         "SELECT p.id,p.account_id,d.hostname FROM pod_deployments p
-         JOIN accounts a ON a.id=p.account_id JOIN domain_registrations d ON d.id=p.domain_registration_id
-         WHERE a.public_id LIKE 'VP3-P5-%' ORDER BY p.id DESC LIMIT 1"
-    )->fetch(PDO::FETCH_ASSOC);
+         JOIN domain_registrations d ON d.id=p.domain_registration_id
+         WHERE p.id=:deployment AND p.status IN ('pending','provisioning','active','degraded','failed') LIMIT 1"
+    );
+    $deploymentStatement->execute(['deployment' => $podJob['deployment_id']]);
+    $deployment = $deploymentStatement->fetch(PDO::FETCH_ASSOC);
     if (!is_array($deployment)) {
         throw new RuntimeException('Retained POD fixture for infrastructure lease testing is missing.');
     }
