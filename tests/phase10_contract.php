@@ -52,6 +52,7 @@ foreach ([
 }
 $assert(str_contains($service, '$blockers += $findingCount'), 'Readiness blockers are not aggregated by actual finding count.');
 $assert(str_contains($service, '$warnings += $findingCount'), 'Readiness warnings are not aggregated by actual finding count.');
+$assert(str_contains($service, '100.0 / (1.0 + ($blockers * 0.25) + ($warnings * 0.05))'), 'Readiness score can saturate instead of reflecting recovery.');
 $notificationService = file_get_contents($root . '/src/Operations/OperationalNotificationService.php') ?: '';
 $incidentService = file_get_contents($root . '/src/Operations/OperationalIncidentService.php') ?: '';
 $monitorService = file_get_contents($root . '/src/Operations/OperationsMonitorService.php') ?: '';
