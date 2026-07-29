@@ -40,18 +40,9 @@ jobs:
               text = text.replace(old_call, new_call, 1)
           elif new_call not in text:
               raise SystemExit('Suspension authority call was not found')
-
           marker = "    private function revokeDeviceAuthority(PDO $pdo, int $deviceId): void\n"
           helper_signature = "    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void\n"
-          helper = """    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void
-    {
-        $pdo->prepare(\"UPDATE homeserver_entitlement_leases SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")
-            ->execute(['device' => $deviceId]);
-        $pdo->prepare(\"UPDATE homeserver_installer_grants SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")
-            ->execute(['device' => $deviceId]);
-    }
-
-"""
+          helper = "    private function revokeSoftwareAuthority(PDO $pdo, int $deviceId): void\n    {\n        $pdo->prepare(\"UPDATE homeserver_entitlement_leases SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")\n            ->execute(['device' => $deviceId]);\n        $pdo->prepare(\"UPDATE homeserver_installer_grants SET status='revoked',revoked_at=UTC_TIMESTAMP() WHERE device_id=:device AND status='active'\")\n            ->execute(['device' => $deviceId]);\n    }\n\n"
           if helper_signature not in text:
               if marker not in text:
                   raise SystemExit('Full device authority helper marker was not found')
