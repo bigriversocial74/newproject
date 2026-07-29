@@ -11,8 +11,16 @@ AuthEndpoint::requireMethod('POST');
 try {
     $payload = AuthEndpoint::payload();
     $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
-    $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent(), false);
-    $revoked = $container['database_sessions']->revokeAllForUser($current['user']['id'], 'logout_all');
+    $ip = AuthEndpoint::ip();
+    $userAgent = AuthEndpoint::userAgent();
+    $current = $container['authentication_context']->requireCurrent($ip, $userAgent, false);
+    $revoked = $container['database_sessions']->revokeAllForUser(
+        $current['user']['id'],
+        'logout_all',
+        null,
+        $ip,
+        $userAgent
+    );
     $container['session']->destroy();
     JsonResponse::send(['data' => ['status' => 'logged_out', 'revoked_sessions' => $revoked]]);
 } catch (Throwable $exception) {
