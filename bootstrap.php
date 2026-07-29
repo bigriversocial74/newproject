@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\PasswordPolicy;
 use Vp3\Database;
@@ -32,6 +33,7 @@ $config = require $configFile;
 $database = new Database($config['database']);
 $passwordPolicy = new PasswordPolicy((int) $config['auth']['password_min_length']);
 $auth = new AuthService($database, $passwordPolicy);
+$accountSecurity = new AccountSecurityService($database, $passwordPolicy);
 $session = new SessionManager([
     'name' => (string) $config['app']['session_name'],
     'secure' => (bool) $config['app']['session_secure'],
@@ -41,5 +43,6 @@ return [
     'config' => $config,
     'database' => $database,
     'auth' => $auth,
+    'account_security' => $accountSecurity,
     'session' => $session,
 ];
