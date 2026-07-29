@@ -74,11 +74,17 @@ final class HomeServerEndpoint
     {
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
-        $membership = $container['database']->pdo()->prepare(
-            "SELECT account_id FROM account_users WHERE user_id=:user AND status='active'
-             AND role IN ('owner','administrator') ORDER BY account_id LIMIT 1"
-        );
-        $membership->execute(['user' => (int) $current['user']['id']]);
+        $requestedAccountId = max(0, (int) ($payload['account_id'] ?? 0));
+        $sql = "SELECT account_id FROM account_users WHERE user_id=:user AND status='active'
+                AND role IN ('owner','administrator')";
+        $parameters = ['user' => (int) $current['user']['id']];
+        if ($requestedAccountId > 0) {
+            $sql .= ' AND account_id=:account';
+            $parameters['account'] = $requestedAccountId;
+        }
+        $sql .= ' ORDER BY account_id LIMIT 1';
+        $membership = $container['database']->pdo()->prepare($sql);
+        $membership->execute($parameters);
         $accountId = (int) $membership->fetchColumn();
         if ($accountId < 1) {
             throw new RuntimeException('An active VP3 account owner or administrator membership is required.');
