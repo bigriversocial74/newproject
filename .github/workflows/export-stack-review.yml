@@ -1,0 +1,22 @@
+name: Export VP3 Stack Review Snapshot
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build exact source snapshot
+        run: tar --exclude=.git -czf vp3-stack-review-source.tar.gz .
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: vp3-stack-review-source
+          path: vp3-stack-review-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
