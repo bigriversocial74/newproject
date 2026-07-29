@@ -1,0 +1,19 @@
+{
+  "name": "vp3/platform",
+  "description": "VP3.me account, domain, licensing, provisioning, and operations platform",
+  "type": "project",
+  "require": {
+    "php": "^8.1",
+    "ext-pdo": "*",
+    "ext-json": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Vp3\\": "src/"
+    }
+  },
+  "scripts": {
+    "test": "php tests/run.php",
+    "lint": "find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l"
+  }
+}
