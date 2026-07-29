@@ -54,12 +54,14 @@ jobs:
           php tests/phase10_contract.php
           php tests/phase11a_contract.php
           php tests/phase11a_runtime.php
-      - id: phase11b
-        name: Run Phase 11B static and runtime certification
+      - id: phase11b_static
+        name: Run Phase 11B static certification
         continue-on-error: true
-        run: |
-          php tests/phase11b_contract.php
-          php tests/phase11b_runtime.php
+        run: php tests/phase11b_contract.php
+      - id: phase11b_runtime
+        name: Run Phase 11B runtime certification
+        continue-on-error: true
+        run: php tests/phase11b_runtime.php
       - name: Publish PHP stage statuses
         if: always()
         continue-on-error: true
@@ -68,15 +70,17 @@ jobs:
           PLATFORM: ${{ steps.platform.outcome }}
           SYNTAX: ${{ steps.syntax.outcome }}
           RETAINED: ${{ steps.retained.outcome }}
-          PHASE11B: ${{ steps.phase11b.outcome }}
+          STATIC: ${{ steps.phase11b_static.outcome }}
+          RUNTIME: ${{ steps.phase11b_runtime.outcome }}
           VERSION: ${{ matrix.php }}
         run: |
           bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/platform" "$PLATFORM" "PHP ${VERSION} platform"
           bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/syntax" "$SYNTAX" "PHP ${VERSION} syntax"
           bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/retained" "$RETAINED" "PHP ${VERSION} retained tests"
-          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/phase11b" "$PHASE11B" "PHP ${VERSION} Phase 11B tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/static" "$STATIC" "PHP ${VERSION} Phase 11B static"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/runtime" "$RUNTIME" "PHP ${VERSION} Phase 11B runtime"
           aggregate=success
-          if [[ "$PLATFORM" != success || "$SYNTAX" != success || "$RETAINED" != success || "$PHASE11B" != success ]]; then aggregate=failure; fi
+          if [[ "$PLATFORM" != success || "$SYNTAX" != success || "$RETAINED" != success || "$STATIC" != success || "$RUNTIME" != success ]]; then aggregate=failure; fi
           bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}" "$aggregate" "Phase 11B PHP ${VERSION}"
       - name: Enforce PHP certification
         if: always()
@@ -84,12 +88,14 @@ jobs:
           PLATFORM: ${{ steps.platform.outcome }}
           SYNTAX: ${{ steps.syntax.outcome }}
           RETAINED: ${{ steps.retained.outcome }}
-          PHASE11B: ${{ steps.phase11b.outcome }}
+          STATIC: ${{ steps.phase11b_static.outcome }}
+          RUNTIME: ${{ steps.phase11b_runtime.outcome }}
         run: |
           [[ "$PLATFORM" == success ]]
           [[ "$SYNTAX" == success ]]
           [[ "$RETAINED" == success ]]
-          [[ "$PHASE11B" == success ]]
+          [[ "$STATIC" == success ]]
+          [[ "$RUNTIME" == success ]]
 
   mysql8:
     runs-on: ubuntu-latest
