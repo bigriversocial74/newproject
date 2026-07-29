@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   finalize:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feature/vp3-homeserver-control-plane-v1-20260729'
+    if: ${{ github.ref == 'refs/heads/feature/vp3-homeserver-control-plane-v1-20260729' || github.head_ref == 'feature/vp3-homeserver-control-plane-v1-20260729' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
