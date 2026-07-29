@@ -16,6 +16,8 @@ use Vp3\Catalog\PlanCatalogService;
 use Vp3\Database;
 use Vp3\Deployments\PodHealthService;
 use Vp3\DomainCodes\DomainRegistryService;
+use Vp3\HomeServers\HomeServerLeaseSigner;
+use Vp3\HomeServers\HomeServerRegistryService;
 use Vp3\Http\SessionManager;
 use Vp3\Licensing\DomainLicenseBundleService;
 use Vp3\Licensing\LicenseLifecycleService;
@@ -74,6 +76,16 @@ $podProvisioning = new PodProvisioningService(
     (array) $config['provisioning']['protected_configuration_paths']
 );
 $podHealth = new PodHealthService($database);
+$homeServerLeaseSigner = new HomeServerLeaseSigner(
+    (string) $config['homeserver']['lease_signing_key'],
+    (string) $config['homeserver']['lease_signing_key_id']
+);
+$homeServers = new HomeServerRegistryService(
+    $database,
+    $homeServerLeaseSigner,
+    (int) $config['homeserver']['pairing_ttl_seconds'],
+    (int) $config['homeserver']['lease_ttl_seconds']
+);
 $session = new SessionManager([
     'name' => (string) $config['app']['session_name'],
     'secure' => (bool) $config['app']['session_secure'],
@@ -98,5 +110,7 @@ return [
     'pod_provisioning_adapter' => $podProvisioningAdapter,
     'pod_provisioning' => $podProvisioning,
     'pod_health' => $podHealth,
+    'homeserver_lease_signer' => $homeServerLeaseSigner,
+    'homeservers' => $homeServers,
     'session' => $session,
 ];
