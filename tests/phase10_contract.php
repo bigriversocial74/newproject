@@ -50,6 +50,8 @@ foreach ([
 ] as $method) {
     $assert(str_contains($service, 'function ' . $method), 'Missing Phase 10 lifecycle operation: ' . $method);
 }
+$assert(str_contains($service, '$blockers += $findingCount'), 'Readiness blockers are not aggregated by actual finding count.');
+$assert(str_contains($service, '$warnings += $findingCount'), 'Readiness warnings are not aggregated by actual finding count.');
 $notificationService = file_get_contents($root . '/src/Operations/OperationalNotificationService.php') ?: '';
 $incidentService = file_get_contents($root . '/src/Operations/OperationalIncidentService.php') ?: '';
 $monitorService = file_get_contents($root . '/src/Operations/OperationsMonitorService.php') ?: '';
