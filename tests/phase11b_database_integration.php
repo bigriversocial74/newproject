@@ -49,7 +49,7 @@ $audit = new AuthAuditService($database);
 $config = [
     'verification_ttl_seconds' => 600,
     'password_reset_ttl_seconds' => 600,
-    'login_attempt_limit' => 3,
+    'login_attempt_limit' => 5,
     'login_attempt_window_seconds' => 3600,
     'base_url' => 'https://vp3.example.test',
 ];
@@ -266,7 +266,7 @@ try {
 
     $throttleEmail = 'phase11b-throttle-' . $suffix . '@example.test';
     $throttleIp = '198.51.100.' . random_int(1, 200);
-    for ($attempt = 0; $attempt < 3; $attempt++) {
+    for ($attempt = 0; $attempt < 5; $attempt++) {
         $auth->authenticate($throttleEmail, 'WrongPass123', $throttleIp, 'throttle-agent');
     }
     $expectAuthCode(static fn () => $auth->authenticate($throttleEmail, 'WrongPass123', $throttleIp, 'throttle-agent'), 'login_throttled');
