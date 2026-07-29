@@ -386,8 +386,11 @@ try {
     $updateJob = ['id' => (int) $pdo->lastInsertId()];
     $pdo->prepare(
         "INSERT INTO update_steps (job_id,stage,sequence_no,status,attempts,created_at,updated_at)
-         VALUES (:job,'downloading',1,'pending',0,UTC_TIMESTAMP(),UTC_TIMESTAMP()),
-                (:job,'completed',2,'pending',0,UTC_TIMESTAMP(),UTC_TIMESTAMP())"
+         VALUES (:job,'downloading',1,'pending',0,UTC_TIMESTAMP(),UTC_TIMESTAMP())"
+    )->execute(['job' => $updateJob['id']]);
+    $pdo->prepare(
+        "INSERT INTO update_steps (job_id,stage,sequence_no,status,attempts,created_at,updated_at)
+         VALUES (:job,'completed',2,'pending',0,UTC_TIMESTAMP(),UTC_TIMESTAMP())"
     )->execute(['job' => $updateJob['id']]);
     $pdo->exec("UPDATE update_jobs SET status='failed' WHERE id<>" . (int) $updateJob['id'] . " AND status IN ('queued','running','validating','backing_up','downloading','installing','migrating','verifying','rolling_back')");
     $updateReceiptBefore = 0;
