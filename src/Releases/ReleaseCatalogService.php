@@ -23,7 +23,8 @@ final class ReleaseCatalogService
         if ($code === '' || trim($name) === '' || !in_array($targetType, ['pod', 'homeserver'], true)) {
             throw new RuntimeException('A valid release product code, name, and target type are required.');
         }
-        $this->database->pdo()->prepare(
+        $pdo = $this->database->pdo();
+        $pdo->prepare(
             'INSERT INTO software_products (public_id,code,name,target_type,status,created_at,updated_at)
              VALUES (:public,:code,:name,:target,\'active\',UTC_TIMESTAMP(),UTC_TIMESTAMP())
              ON DUPLICATE KEY UPDATE name=VALUES(name),status=\'active\',updated_at=UTC_TIMESTAMP()'
@@ -33,14 +34,14 @@ final class ReleaseCatalogService
             'name' => substr(trim($name), 0, 190),
             'target' => $targetType,
         ]);
-        $query = $this->database->pdo()->prepare('SELECT id FROM software_products WHERE code=:code LIMIT 1');
+        $query = $pdo->prepare('SELECT id FROM software_products WHERE code=:code LIMIT 1');
         $query->execute(['code' => $code]);
         return (int) $query->fetchColumn();
     }
 
     /**
      * @param list<array{platform:string,architecture:string,storage_reference:string,sha256:string,size_bytes:int}> $artifacts
-     * @param array{minimum_current_version?:?string,maximum_current_version?:?string,minimum_php_version?:?string,database_family?:string,minimum_database_version?:?string} $compatibility
+     * @param array<string,mixed> $compatibility
      * @return array{release_id:int,release_public_id:string}
      */
     public function createDraftRelease(
@@ -56,11 +57,8 @@ final class ReleaseCatalogService
     ): array {
         $this->assertVersion($version);
         $channel = strtolower(trim($channel));
-        if (!in_array($channel, ['stable', 'beta', 'security'], true)) {
-            throw new RuntimeException('Release channel must be stable, beta, or security.');
-        }
-        if ($artifacts === []) {
-            throw new RuntimeException('At least one release artifact is required.');
+        if (!in_array($channel, ['stable', 'beta', 'security'], true) || $artifacts === []) {
+            throw new RuntimeException('A valid release channel and at least one artifact are required.');
         }
         if ($rolloutPercentage < 0 || $rolloutPercentage > 100) {
             throw new RuntimeException('Rollout percentage must be between 0 and 100.');
@@ -85,13 +83,13 @@ final class ReleaseCatalogService
             )->execute([
                 'public' => $publicId,
                 'product' => $productId,
-                'version' => $version,
+                'version' => trim($version),
                 'channel' => $channel,
                 'notes' => hash('sha256', $releaseNotes),
                 'emergency' => $emergencyOverride ? 1 : 0,
             ]);
             $releaseId = (int) $pdo->lastInsertId();
-            $artifactInsert = $pdo->prepare(
+            $insertArtifact = $pdo->prepare(
                 'INSERT INTO release_artifacts
                  (release_id,platform,architecture,storage_reference,sha256,size_bytes,created_at)
                  VALUES (:release,:platform,:architecture,:storage,:sha,:size,UTC_TIMESTAMP())'
@@ -105,7 +103,7 @@ final class ReleaseCatalogService
                     || (int) ($artifact['size_bytes'] ?? 0) < 1) {
                     throw new RuntimeException('Release artifact metadata is invalid.');
                 }
-                $artifactInsert->execute([
+                $insertArtifact->execute([
                     'release' => $releaseId,
                     'platform' => substr(trim((string) $artifact['platform']), 0, 80),
                     'architecture' => substr(trim((string) $artifact['architecture']), 0, 80),
@@ -139,11 +137,7 @@ final class ReleaseCatalogService
                 'INSERT INTO release_rollouts
                  (release_id,status,percentage,cohort_seed,starts_at,created_at,updated_at)
                  VALUES (:release,\'planned\',:percentage,:seed,UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP())'
-            )->execute([
-                'release' => $releaseId,
-                'percentage' => $rolloutPercentage,
-                'seed' => bin2hex(random_bytes(32)),
-            ]);
+            )->execute(['release' => $releaseId, 'percentage' => $rolloutPercentage, 'seed' => bin2hex(random_bytes(32))]);
             $this->event($pdo, $releaseId, $requestId, 'release_draft_created', 'success', [
                 'version' => $version,
                 'channel' => $channel,
@@ -166,11 +160,12 @@ final class ReleaseCatalogService
             $manifest = $this->manifest($pdo, $release);
             $signed = $this->signer->sign($manifest);
             $pdo->prepare(
-                'UPDATE software_releases SET status=\'published\',manifest_hash=:hash,manifest_signature=:signature,
-                 signature_algorithm=:algorithm,signing_key_id=:key_id,published_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP()
-                 WHERE id=:id'
+                'UPDATE software_releases SET status=\'published\',manifest_hash=:hash,manifest_document=:document,
+                 manifest_signature=:signature,signature_algorithm=:algorithm,signing_key_id=:key_id,
+                 published_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=:id'
             )->execute([
                 'hash' => $signed['manifest_hash'],
+                'document' => $signed['manifest'],
                 'signature' => $signed['signature'],
                 'algorithm' => $signed['algorithm'],
                 'key_id' => $signed['key_id'],
@@ -215,38 +210,32 @@ final class ReleaseCatalogService
         });
     }
 
-    /** @return array<string,mixed> */
+    /** @return array{manifest:string,signature:string,key_id:string,algorithm:string,manifest_hash:string} */
     public function signedManifest(int $releaseId): array
     {
-        $pdo = $this->database->pdo();
-        $release = $this->release($pdo, $releaseId, false);
-        if ($release['status'] !== 'published' || !is_string($release['manifest_signature'])) {
+        $release = $this->release($this->database->pdo(), $releaseId, false);
+        if ($release['status'] !== 'published'
+            || !is_string($release['manifest_document']) || $release['manifest_document'] === ''
+            || !is_string($release['manifest_signature']) || $release['manifest_signature'] === '') {
             throw new RuntimeException('Published signed release was not found.');
         }
-        $manifest = $this->manifest($pdo, $release);
-        $document = $this->base64Url($this->canonicalJson($manifest));
         return [
-            'manifest' => $document,
+            'manifest' => $release['manifest_document'],
             'signature' => $release['manifest_signature'],
-            'key_id' => $release['signing_key_id'],
-            'algorithm' => $release['signature_algorithm'],
-            'manifest_hash' => hash('sha256', $this->canonicalJson($manifest)),
+            'key_id' => (string) $release['signing_key_id'],
+            'algorithm' => (string) $release['signature_algorithm'],
+            'manifest_hash' => (string) $release['manifest_hash'],
         ];
     }
 
     /** @param array<string,mixed> $release @return array<string,mixed> */
     private function manifest(PDO $pdo, array $release): array
     {
-        $artifacts = $pdo->prepare(
-            'SELECT platform,architecture,storage_reference,sha256,size_bytes FROM release_artifacts WHERE release_id=:release ORDER BY platform,architecture'
-        );
+        $artifacts = $pdo->prepare('SELECT platform,architecture,storage_reference,sha256,size_bytes FROM release_artifacts WHERE release_id=:release ORDER BY platform,architecture');
         $artifacts->execute(['release' => $release['id']]);
-        $compatibility = $pdo->prepare(
-            'SELECT minimum_current_version,maximum_current_version,minimum_php_version,database_family,minimum_database_version
-             FROM release_compatibility_rules WHERE release_id=:release LIMIT 1'
-        );
+        $compatibility = $pdo->prepare('SELECT minimum_current_version,maximum_current_version,minimum_php_version,database_family,minimum_database_version FROM release_compatibility_rules WHERE release_id=:release LIMIT 1');
         $compatibility->execute(['release' => $release['id']]);
-        $rollout = $pdo->prepare('SELECT status,percentage,cohort_seed,starts_at,ends_at FROM release_rollouts WHERE release_id=:release LIMIT 1');
+        $rollout = $pdo->prepare('SELECT percentage,cohort_seed,starts_at,ends_at FROM release_rollouts WHERE release_id=:release LIMIT 1');
         $rollout->execute(['release' => $release['id']]);
         return [
             'schema' => 'vp3.release-manifest.v1',
@@ -259,7 +248,7 @@ final class ReleaseCatalogService
             'release_notes_hash' => $release['release_notes_hash'],
             'artifacts' => $artifacts->fetchAll(PDO::FETCH_ASSOC),
             'compatibility' => $compatibility->fetch(PDO::FETCH_ASSOC) ?: [],
-            'rollout' => $rollout->fetch(PDO::FETCH_ASSOC) ?: [],
+            'initial_rollout' => $rollout->fetch(PDO::FETCH_ASSOC) ?: [],
         ];
     }
 
@@ -284,16 +273,14 @@ final class ReleaseCatalogService
         if (trim($requestId) === '') {
             throw new RuntimeException('Release mutation request ID is required.');
         }
-        $pdo->prepare(
-            'INSERT INTO release_events (release_id,request_id,event_type,result,metadata_json,created_at)
-             VALUES (:release,:request,:type,:result,:metadata,UTC_TIMESTAMP())'
-        )->execute([
-            'release' => $releaseId,
-            'request' => $requestId,
-            'type' => $type,
-            'result' => $result,
-            'metadata' => $metadata === null ? null : $this->canonicalJson($metadata),
-        ]);
+        $pdo->prepare('INSERT INTO release_events (release_id,request_id,event_type,result,metadata_json,created_at) VALUES (:release,:request,:type,:result,:metadata,UTC_TIMESTAMP())')
+            ->execute([
+                'release' => $releaseId,
+                'request' => $requestId,
+                'type' => $type,
+                'result' => $result,
+                'metadata' => $metadata === null ? null : $this->canonicalJson($metadata),
+            ]);
     }
 
     private function assertVersion(string $version): void
@@ -328,10 +315,5 @@ final class ReleaseCatalogService
             return $item;
         };
         return json_encode($normalize($value), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-    }
-
-    private function base64Url(string $value): string
-    {
-        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 }
