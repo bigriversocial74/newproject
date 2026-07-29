@@ -27,6 +27,7 @@ jobs:
           fetch-depth: 0
       - name: Apply lease-ownership repair
         run: |
+          # The payload is an exact incremental patch against the current certified Phase 11A head.
           base64 -d .phase11a-ownership-fix/payload.b64 | gzip -d > /tmp/phase11a-ownership.patch
           git apply --check /tmp/phase11a-ownership.patch
           git apply /tmp/phase11a-ownership.patch
