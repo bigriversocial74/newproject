@@ -40,6 +40,7 @@ $database = new Database([
         PDO::ATTR_EMULATE_PREPARES => false,
     ],
 ]);
+$pdo = $database->pdo();
 $policy = new PasswordPolicy(12);
 $mail = new NullMailAdapter();
 $audit = new AuthAuditService($database);
@@ -94,10 +95,31 @@ try {
     }
 
     $session = $sessions->create($registered['user_id'], '203.0.113.40', 'post-audit-agent');
+    $preservedAbsolute = (new DateTimeImmutable('now'))->modify('+10 minutes');
+    $pdo->prepare(
+        'UPDATE auth_sessions
+         SET expires_at = :expires_at, absolute_expires_at = :absolute_expires_at
+         WHERE session_public_id = :public_id'
+    )->execute([
+        'expires_at' => $preservedAbsolute->format('Y-m-d H:i:s'),
+        'absolute_expires_at' => $preservedAbsolute->format('Y-m-d H:i:s'),
+        'public_id' => $session['public_id'],
+    ]);
+
     $rotated = $sessions->rotate($session['token'], '203.0.113.40', 'post-audit-agent');
-    if (!hash_equals($session['absolute_expires_at'], $rotated['absolute_expires_at'])) {
+    if (!hash_equals($preservedAbsolute->format(DATE_ATOM), $rotated['absolute_expires_at'])) {
         $failures[] = 'Session rotation extended the absolute session lifetime.';
     }
+    $storedAbsolute = $pdo->prepare(
+        'SELECT absolute_expires_at FROM auth_sessions WHERE session_public_id = :public_id'
+    );
+    $storedAbsolute->execute(['public_id' => $rotated['public_id']]);
+    $storedValue = $storedAbsolute->fetchColumn();
+    if (!is_string($storedValue)
+        || !hash_equals($preservedAbsolute->format('Y-m-d H:i:s'), $storedValue)) {
+        $failures[] = 'Rotated session did not persist the original absolute expiry.';
+    }
+
     $sessions->validate($rotated['token'], '203.0.113.40', 'post-audit-agent');
     $listed = $sessions->listForUser($registered['user_id'], $rotated['public_id']);
     $currentFound = false;
