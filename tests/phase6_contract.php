@@ -46,8 +46,8 @@ foreach ([
 ] as $method) {
     $assert(str_contains($service, 'function ' . $method), 'Missing HomeServer lifecycle operation: ' . $method);
 }
-$assert(str_contains($service, "hash('sha256', $credential)"), 'Device credentials are not hashed before storage.');
-$assert(str_contains($service, "hash('sha256', $code)"), 'Pairing codes are not hashed before storage.');
+$assert(str_contains($service, "hash('sha256', \$credential)"), 'Device credentials are not hashed before storage.');
+$assert(str_contains($service, "hash('sha256', \$code)"), 'Pairing codes are not hashed before storage.');
 $assert(str_contains($service, 'frontend_limit'), 'Licensed paired-front-end limit is not enforced.');
 $assert(str_contains($service, 'HomeServerLeaseSigner'), 'Signed entitlement lease dependency is missing.');
 $assert(str_contains($service, 'entitlement_snapshot_hash'), 'Entitlement snapshot receipt is missing.');
