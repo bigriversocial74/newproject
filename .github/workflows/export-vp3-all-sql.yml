@@ -1,0 +1,60 @@
+name: Export VP3 All SQL
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build standalone SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="vp3-all-in-one.sql"
+          {
+            printf '%s\n' '-- VP3.me complete first-install SQL'
+            printf '%s\n' '-- Generated from main merge 123d194d96ebbaf225233147343563d9a7cd10da'
+            printf '%s\n\n' '-- Includes Phases 2 through 10 in certified order.'
+            for file in \
+              database/migrations/20260728_phase2_auth_accounts.sql \
+              database/migrations/20260729_phase2_auth_accounts_quality.sql \
+              database/migrations/20260729_phase2_auth_accounts_completion.sql \
+              database/migrations/20260729_phase3_domain_plans_licenses.sql \
+              database/migrations/20260729_phase4_stripe_billing.sql \
+              database/migrations/20260729_phase5_pod_provisioning.sql \
+              database/migrations/20260729_phase6_homeserver_registry.sql \
+              database/migrations/20260729_phase7_releases_updates.sql \
+              database/migrations/20260729_phase7_release_manifest_documents.sql \
+              database/migrations/20260729_phase8_backups_storage.sql \
+              database/migrations/20260729_phase8_backup_job_snapshots.sql \
+              database/migrations/20260729_phase8_snapshot_identity.sql \
+              database/migrations/20260729_phase9_provider_adapters.sql \
+              database/migrations/20260729_phase10_operations_readiness.sql
+            do
+              printf '\n-- BEGIN %s\n' "$file"
+              cat "$file"
+              printf '\n-- END %s\n' "$file"
+            done
+          } > "$output"
+          test -s "$output"
+          if grep -Eq '^SOURCE[[:space:]]' "$output"; then
+            echo 'Unexpected SOURCE directive in standalone SQL.' >&2
+            exit 1
+          fi
+          sha256sum "$output" > vp3-all-in-one.sha256
+      - name: Upload SQL package
+        uses: actions/upload-artifact@v4
+        with:
+          name: vp3-all-sql
+          path: |
+            vp3-all-in-one.sql
+            vp3-all-in-one.sha256
+          if-no-files-found: error
+          retention-days: 7
