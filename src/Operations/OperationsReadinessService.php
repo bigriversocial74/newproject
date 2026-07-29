@@ -201,7 +201,7 @@ final class OperationsReadinessService
                 $warnings += $findingCount;
             }
         }
-        $score = max(0.0, 100.0 - ($blockers * 15.0) - ($warnings * 4.0));
+        $score = round(100.0 / (1.0 + ($blockers * 0.25) + ($warnings * 0.05)), 2);
         $status = $blockers > 0 ? 'blocked' : ($warnings > 0 ? 'warning' : 'ready');
         $evidenceHash = hash('sha256', json_encode($checks, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
         $publicId = 'OPS-READY-' . strtoupper(bin2hex(random_bytes(10)));
