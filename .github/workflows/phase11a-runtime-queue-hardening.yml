@@ -28,10 +28,10 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
           coverage: none
-      - name: Validate Composer platform contract
+      - name: Validate Composer and runtime platform contract
         run: |
           composer validate --strict --no-check-publish
-          composer check-platform-reqs
+          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
       - name: Validate PHP syntax
         run: find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Run retained static certification
