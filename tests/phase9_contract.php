@@ -41,6 +41,7 @@ foreach (['saveConnection', 'enqueueProvision', 'enqueueReconcile', 'enqueueTear
 foreach (['FOR UPDATE SKIP LOCKED', 'hosting_allocate', 'dns_bind', 'certificate_request', 'certificate_revoke', 'dns_remove', 'hosting_release'] as $contract) {
     $assert(str_contains($service, $contract), 'Missing infrastructure safety contract: ' . $contract);
 }
+$assert(str_contains($service, 'Infrastructure provider verification failed for stage:'), 'Individual provider verification failures are not enforced.');
 $installer = file_get_contents($root . '/database/vp3-single-install.sql') ?: '';
 $assert(str_contains($installer, '20260729_phase9_provider_adapters.sql'), 'Phase 9 migration is missing from the cumulative installer.');
 $config = file_get_contents($root . '/config/config-example.php') ?: '';
