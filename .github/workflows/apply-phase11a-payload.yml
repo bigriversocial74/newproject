@@ -7,6 +7,13 @@ on:
     paths:
       - '.phase11a-payload/**'
       - '.github/workflows/apply-phase11a-payload.yml'
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
@@ -17,7 +24,7 @@ concurrency:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name == 'push' || github.head_ref == 'feature/vp3-phase-11a-runtime-queue-hardening-20260729')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
