@@ -41,4 +41,11 @@ return [
             explode(',', getenv('VP3_PROTECTED_CONFIGURATION_PATHS') ?: 'database.password,app.key,customer')
         ))),
     ],
+    'homeserver' => [
+        'lease_signing_key' => getenv('HOMESERVER_LEASE_SIGNING_KEY') ?: '',
+        'lease_signing_key_id' => getenv('HOMESERVER_LEASE_SIGNING_KEY_ID') ?: 'homeserver-hs256-v1',
+        'pairing_ttl_seconds' => max(60, (int) (getenv('HOMESERVER_PAIRING_TTL_SECONDS') ?: 900)),
+        'lease_ttl_seconds' => max(300, (int) (getenv('HOMESERVER_LEASE_TTL_SECONDS') ?: 3600)),
+        'offline_after_minutes' => max(1, (int) (getenv('HOMESERVER_OFFLINE_AFTER_MINUTES') ?: 10)),
+    ],
 ];
