@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use PDO;
 use PDOException;
 use RuntimeException;
+use Throwable;
 use Vp3\Auth\Mail\MailAdapter;
 use Vp3\Auth\Mail\NullMailAdapter;
 use Vp3\Database;
@@ -112,8 +113,22 @@ final class AuthService
                     'expires_at' => $now->modify('+' . max(60, (int) $this->config['verification_ttl_seconds']) . ' seconds')->format('Y-m-d H:i:s'),
                     'created_at' => $now->format('Y-m-d H:i:s'),
                 ]);
+                $this->audit->record(
+                    'auth.registration',
+                    'success',
+                    $userId,
+                    $accountId,
+                    'user',
+                    $userPublicId,
+                    [],
+                    $requestId
+                );
 
-                return ['account_id' => $accountId, 'user_id' => $userId, 'verification_token' => $verificationToken];
+                return [
+                    'account_id' => $accountId,
+                    'user_id' => $userId,
+                    'verification_token' => $verificationToken,
+                ];
             });
         } catch (PDOException $exception) {
             if ((string) $exception->getCode() === '23000') {
@@ -123,9 +138,35 @@ final class AuthService
             throw $exception;
         }
 
-        $this->sendVerificationEmail($email, $displayName, $verificationToken);
-        $this->audit->record('auth.registration', 'success', $result['user_id'], $result['account_id'], 'user', null, [], $requestId);
-        $this->audit->record('auth.verification.requested', 'success', $result['user_id'], $result['account_id'], 'user', null, [], $requestId);
+        try {
+            $this->sendVerificationEmail($email, $displayName, $verificationToken);
+            $this->audit->record(
+                'auth.verification.requested',
+                'success',
+                $result['user_id'],
+                $result['account_id'],
+                'user',
+                null,
+                ['delivered' => true],
+                $requestId
+            );
+        } catch (Throwable) {
+            $this->audit->record(
+                'auth.verification.requested',
+                'failure',
+                $result['user_id'],
+                $result['account_id'],
+                'user',
+                null,
+                ['delivered' => false, 'reason' => 'mail_delivery_failed'],
+                $requestId
+            );
+            throw new AuthPublicException(
+                'verification_delivery_failed',
+                'The account was created, but the verification email could not be sent. Request a new verification email.',
+                503
+            );
+        }
         return $result;
     }
 
