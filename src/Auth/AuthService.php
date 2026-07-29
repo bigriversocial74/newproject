@@ -46,15 +46,12 @@ final class AuthService
             $accountPublicId = 'VP3-' . strtoupper(bin2hex(random_bytes(6)));
             $userPublicId = 'USR-' . strtoupper(bin2hex(random_bytes(6)));
             $verificationToken = bin2hex(random_bytes(32));
-            $verificationHash = hash('sha256', $verificationToken);
             $now = new DateTimeImmutable('now');
-            $verificationExpires = $now->modify('+24 hours');
 
-            $account = $pdo->prepare(
+            $pdo->prepare(
                 'INSERT INTO accounts (public_id, account_type, status, display_name, created_at, updated_at)
                  VALUES (:public_id, :account_type, :status, :display_name, :created_at, :updated_at)'
-            );
-            $account->execute([
+            )->execute([
                 'public_id' => $accountPublicId,
                 'account_type' => 'individual',
                 'status' => 'pending_verification',
@@ -64,11 +61,10 @@ final class AuthService
             ]);
             $accountId = (int) $pdo->lastInsertId();
 
-            $user = $pdo->prepare(
+            $pdo->prepare(
                 'INSERT INTO users (public_id, email, email_normalized, password_hash, display_name, status, created_at, updated_at)
                  VALUES (:public_id, :email, :email_normalized, :password_hash, :display_name, :status, :created_at, :updated_at)'
-            );
-            $user->execute([
+            )->execute([
                 'public_id' => $userPublicId,
                 'email' => $email,
                 'email_normalized' => $email,
@@ -80,43 +76,49 @@ final class AuthService
             ]);
             $userId = (int) $pdo->lastInsertId();
 
-            $membership = $pdo->prepare(
+            $pdo->prepare(
                 'INSERT INTO account_users (account_id, user_id, role, status, created_at, updated_at)
                  VALUES (:account_id, :user_id, :role, :status, :created_at, :updated_at)'
-            );
-            $membership->execute([
+            )->execute([
                 'account_id' => $accountId,
                 'user_id' => $userId,
-                'role' => 'owner',
+                'role' => 'customer_owner',
                 'status' => 'active',
                 'created_at' => $now->format('Y-m-d H:i:s'),
                 'updated_at' => $now->format('Y-m-d H:i:s'),
             ]);
 
-            $verification = $pdo->prepare(
+            $pdo->prepare(
                 'INSERT INTO email_verification_tokens (user_id, token_hash, expires_at, created_at)
                  VALUES (:user_id, :token_hash, :expires_at, :created_at)'
-            );
-            $verification->execute([
+            )->execute([
                 'user_id' => $userId,
-                'token_hash' => $verificationHash,
-                'expires_at' => $verificationExpires->format('Y-m-d H:i:s'),
+                'token_hash' => hash('sha256', $verificationToken),
+                'expires_at' => $now->modify('+24 hours')->format('Y-m-d H:i:s'),
                 'created_at' => $now->format('Y-m-d H:i:s'),
             ]);
 
-            return [
-                'account_id' => $accountId,
-                'user_id' => $userId,
-                'verification_token' => $verificationToken,
-            ];
+            return ['account_id' => $accountId, 'user_id' => $userId, 'verification_token' => $verificationToken];
         });
     }
 
     /** @return array{id:int,public_id:string,email:string,display_name:string}|null */
-    public function authenticate(string $email, string $password): ?array
+    public function authenticate(string $email, string $password, string $ip = '', string $userAgent = ''): ?array
     {
         $email = strtolower(trim($email));
         $pdo = $this->database->pdo();
+        $emailHash = hash('sha256', $email);
+        $ipHash = hash('sha256', $ip);
+        $window = (new DateTimeImmutable('now'))->modify('-15 minutes')->format('Y-m-d H:i:s');
+
+        $attempts = $pdo->prepare(
+            'SELECT COUNT(*) FROM auth_login_attempts
+             WHERE succeeded = 0 AND attempted_at >= :window AND (email_hash = :email_hash OR ip_hash = :ip_hash)'
+        );
+        $attempts->execute(['window' => $window, 'email_hash' => $emailHash, 'ip_hash' => $ipHash]);
+        if ((int) $attempts->fetchColumn() >= 10) {
+            throw new RuntimeException('Too many sign-in attempts. Try again later.');
+        }
 
         $statement = $pdo->prepare(
             'SELECT id, public_id, email, display_name, password_hash, status
@@ -124,25 +126,33 @@ final class AuthService
         );
         $statement->execute(['email' => $email]);
         $user = $statement->fetch();
+        $success = $user && password_verify($password, (string) $user['password_hash'])
+            && in_array($user['status'], ['active', 'pending_verification'], true);
 
-        if (!$user || !password_verify($password, (string) $user['password_hash'])) {
-            return null;
-        }
-        if (!in_array($user['status'], ['active', 'pending_verification'], true)) {
+        $now = new DateTimeImmutable('now');
+        $pdo->prepare(
+            'INSERT INTO auth_login_attempts (email_hash, ip_hash, succeeded, attempted_at)
+             VALUES (:email_hash, :ip_hash, :succeeded, :attempted_at)'
+        )->execute([
+            'email_hash' => $emailHash,
+            'ip_hash' => $ipHash,
+            'succeeded' => $success ? 1 : 0,
+            'attempted_at' => $now->format('Y-m-d H:i:s'),
+        ]);
+
+        if (!$success) {
             return null;
         }
 
         if (password_needs_rehash((string) $user['password_hash'], PASSWORD_DEFAULT)) {
             $rehash = password_hash($password, PASSWORD_DEFAULT);
             if (is_string($rehash)) {
-                $update = $pdo->prepare('UPDATE users SET password_hash = :hash, updated_at = :updated_at WHERE id = :id');
-                $update->execute([
-                    'hash' => $rehash,
-                    'updated_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
-                    'id' => $user['id'],
-                ]);
+                $pdo->prepare('UPDATE users SET password_hash = :hash, updated_at = :updated_at WHERE id = :id')
+                    ->execute(['hash' => $rehash, 'updated_at' => $now->format('Y-m-d H:i:s'), 'id' => $user['id']]);
             }
         }
+        $pdo->prepare('UPDATE users SET last_login_at = :last_login_at, updated_at = :updated_at WHERE id = :id')
+            ->execute(['last_login_at' => $now->format('Y-m-d H:i:s'), 'updated_at' => $now->format('Y-m-d H:i:s'), 'id' => $user['id']]);
 
         return [
             'id' => (int) $user['id'],
