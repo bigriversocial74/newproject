@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Vp3\Auth\AuthPublicException;
 use Vp3\Http\AuthEndpoint;
 use Vp3\Http\JsonResponse;
 
@@ -20,6 +21,16 @@ try {
     );
     if ($user === null) {
         JsonResponse::send(['error' => ['code' => 'invalid_credentials', 'message' => 'The email or password is incorrect.']], 401);
+    }
+
+    $existingToken = $container['session']->applicationToken();
+    if ($existingToken !== '') {
+        try {
+            $container['database_sessions']->revokeCurrent($existingToken, $ip, $userAgent, 'reauthenticated');
+        } catch (AuthPublicException) {
+            // An invalid or expired prior browser token is replaced below.
+        }
+        $container['session']->clearApplicationToken();
     }
 
     $container['session']->regenerate();
