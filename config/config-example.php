@@ -61,4 +61,9 @@ return [
         'warning_threshold_percent' => min(100.0, max(1.0, (float) (getenv('STORAGE_WARNING_THRESHOLD_PERCENT') ?: 80))),
         'critical_threshold_percent' => min(100.0, max(1.0, (float) (getenv('STORAGE_CRITICAL_THRESHOLD_PERCENT') ?: 95))),
     ],
+    'infrastructure' => [
+        'provider_driver' => getenv('VP3_INFRASTRUCTURE_PROVIDER_DRIVER') ?: 'null',
+        'secret_encryption_key_base64' => getenv('PROVIDER_SECRET_ENCRYPTION_KEY_B64') ?: '',
+        'secret_encryption_key_id' => getenv('PROVIDER_SECRET_ENCRYPTION_KEY_ID') ?: 'provider-aes256gcm-v1',
+    ],
 ];
