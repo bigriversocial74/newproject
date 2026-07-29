@@ -5,9 +5,13 @@ declare(strict_types=1);
 use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\PasswordPolicy;
+use Vp3\Billing\SubscriptionLifecycleService;
+use Vp3\Catalog\PlanCatalogService;
 use Vp3\Database;
+use Vp3\DomainCodes\DomainRegistryService;
 use Vp3\Http\SessionManager;
 use Vp3\Licensing\DomainLicenseBundleService;
+use Vp3\Licensing\LicenseLifecycleService;
 
 $autoload = __DIR__ . '/vendor/autoload.php';
 if (!is_file($autoload)) {
@@ -35,7 +39,11 @@ $database = new Database($config['database']);
 $passwordPolicy = new PasswordPolicy((int) $config['auth']['password_min_length']);
 $auth = new AuthService($database, $passwordPolicy);
 $accountSecurity = new AccountSecurityService($database, $passwordPolicy);
+$planCatalog = new PlanCatalogService($database);
+$subscriptionLifecycle = new SubscriptionLifecycleService($database);
+$domainRegistry = new DomainRegistryService($database);
 $domainLicenseBundles = new DomainLicenseBundleService($database);
+$licenseLifecycle = new LicenseLifecycleService($database);
 $session = new SessionManager([
     'name' => (string) $config['app']['session_name'],
     'secure' => (bool) $config['app']['session_secure'],
@@ -46,6 +54,10 @@ return [
     'database' => $database,
     'auth' => $auth,
     'account_security' => $accountSecurity,
+    'plan_catalog' => $planCatalog,
+    'subscription_lifecycle' => $subscriptionLifecycle,
+    'domain_registry' => $domainRegistry,
     'domain_license_bundles' => $domainLicenseBundles,
+    'license_lifecycle' => $licenseLifecycle,
     'session' => $session,
 ];
