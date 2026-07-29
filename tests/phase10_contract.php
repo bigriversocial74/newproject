@@ -59,6 +59,8 @@ foreach (['FOR UPDATE SKIP LOCKED', 'event_status', 'monitor_managed', 'appendWi
     $assert(str_contains($combined, $contract), 'Missing Phase 10 reliability contract: ' . $contract);
 }
 $assert(str_contains($notificationService, "'status' => (string) \$notification['event_status']"), 'Notification payload does not use immutable queued event status.');
+$infrastructureService = file_get_contents($root . '/src/Infrastructure/InfrastructureProviderService.php') ?: '';
+$assert(str_contains($infrastructureService, 'Infrastructure provider verification failed for stage:'), 'Retained Phase 9 provider verification enforcement is missing.');
 
 $installer = file_get_contents($root . '/database/vp3-single-install.sql') ?: '';
 $assert(str_contains($installer, '20260729_phase10_operations_readiness.sql'), 'Phase 10 migration is missing from the cumulative installer.');
