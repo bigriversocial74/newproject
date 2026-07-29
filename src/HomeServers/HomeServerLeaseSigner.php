@@ -12,14 +12,12 @@ final class HomeServerLeaseSigner
         private readonly string $signingKey,
         private readonly string $keyId = 'homeserver-hs256-v1'
     ) {
-        if (strlen($this->signingKey) < 32) {
-            throw new RuntimeException('HomeServer lease signing key must be at least 32 bytes.');
-        }
     }
 
     /** @param array<string,mixed> $claims @return array{document:string,signature:string,key_id:string,document_hash:string,signature_hash:string} */
     public function sign(array $claims): array
     {
+        $this->assertConfigured();
         $document = $this->canonicalJson($claims);
         $signature = $this->base64Url(hash_hmac('sha256', $document, $this->signingKey, true));
         return [
@@ -33,6 +31,7 @@ final class HomeServerLeaseSigner
 
     public function verify(string $document, string $signature): bool
     {
+        $this->assertConfigured();
         $decoded = $this->base64UrlDecode($document);
         if ($decoded === null) {
             return false;
@@ -44,6 +43,13 @@ final class HomeServerLeaseSigner
     public function keyId(): string
     {
         return $this->keyId;
+    }
+
+    private function assertConfigured(): void
+    {
+        if (strlen($this->signingKey) < 32) {
+            throw new RuntimeException('HomeServer lease signing is unavailable until a 32-byte signing key is configured.');
+        }
     }
 
     private function canonicalJson(mixed $value): string
