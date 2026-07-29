@@ -18,7 +18,9 @@ try {
 
     $user = $container['auth']->authenticate(
         (string) ($payload['email'] ?? ''),
-        (string) ($payload['password'] ?? '')
+        (string) ($payload['password'] ?? ''),
+        (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+        (string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
     );
 
     if ($user === null) {
@@ -35,8 +37,11 @@ try {
     ]);
 
     JsonResponse::send(['data' => ['user' => $user]]);
-} catch (JsonException $exception) {
+} catch (JsonException) {
     JsonResponse::send(['error' => ['code' => 'invalid_json', 'message' => 'The request body is not valid JSON.']], 400);
-} catch (Throwable $exception) {
+} catch (RuntimeException $exception) {
+    $status = str_contains($exception->getMessage(), 'Too many') ? 429 : 422;
+    JsonResponse::send(['error' => ['code' => 'login_rejected', 'message' => $exception->getMessage()]], $status);
+} catch (Throwable) {
     JsonResponse::send(['error' => ['code' => 'login_failed', 'message' => 'Unable to sign in.']], 500);
 }
