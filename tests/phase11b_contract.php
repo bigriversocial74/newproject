@@ -85,7 +85,7 @@ foreach (['hashToken($token)','inactivity_expires_at','absolute_expires_at','bin
         $failures[] = 'Database session contract is missing: ' . $contract;
     }
 }
-if (is_string($sessionService) && str_contains($sessionService, "'session_hash' => $token")) {
+if (is_string($sessionService) && str_contains($sessionService, "'session_hash' => \$token")) {
     $failures[] = 'Database session service stores a plaintext session token.';
 }
 
