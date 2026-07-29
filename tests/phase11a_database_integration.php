@@ -354,23 +354,43 @@ try {
     $assert(($podRecovered['job_id'] ?? null) === (int) $podJob['id'] && ($podRecovered['status'] ?? null) === 'completed', 'Lease-lost POD job could not be recovered.');
 
     // Update provider calls cannot persist success or failure evidence after lease theft.
-    $updateJob = $pdo->query(
-        "SELECT j.id FROM update_jobs j JOIN accounts a ON a.id=j.account_id
+    $sourceUpdateJob = $pdo->query(
+        "SELECT j.account_id,j.target_type,j.pod_deployment_id,j.homeserver_device_id,j.release_id,j.previous_version,j.target_version
+         FROM update_jobs j JOIN accounts a ON a.id=j.account_id
          WHERE a.public_id LIKE 'VP3-P7-%' ORDER BY j.id DESC LIMIT 1"
     )->fetch(PDO::FETCH_ASSOC);
-    if (!is_array($updateJob)) {
+    if (!is_array($sourceUpdateJob)) {
         throw new RuntimeException('Retained Phase 7 update fixture is missing.');
     }
+    $updatePublicId = 'UPDATE-JOB-P11A-' . strtoupper(bin2hex(random_bytes(8)));
+    $updateRequestId = 'REQ-P11A-UPDATE-' . $token;
+    $pdo->prepare(
+        "INSERT INTO update_jobs
+         (public_id,account_id,target_type,pod_deployment_id,homeserver_device_id,release_id,status,current_stage,
+          previous_version,target_version,pre_update_backup_verified,attempts,max_attempts,idempotency_key,request_id,
+          available_at,created_at,updated_at)
+         VALUES (:public,:account,:target_type,:pod,:homeserver,:release,'queued',NULL,:previous,:target,1,0,3,:idempotency,
+                 :request,UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP())"
+    )->execute([
+        'public' => $updatePublicId,
+        'account' => $sourceUpdateJob['account_id'],
+        'target_type' => $sourceUpdateJob['target_type'],
+        'pod' => $sourceUpdateJob['pod_deployment_id'],
+        'homeserver' => $sourceUpdateJob['homeserver_device_id'],
+        'release' => $sourceUpdateJob['release_id'],
+        'previous' => $sourceUpdateJob['previous_version'],
+        'target' => $sourceUpdateJob['target_version'],
+        'idempotency' => 'IDEM-P11A-UPDATE-' . $token,
+        'request' => $updateRequestId,
+    ]);
+    $updateJob = ['id' => (int) $pdo->lastInsertId()];
+    $pdo->prepare(
+        "INSERT INTO update_steps (job_id,stage,sequence_no,status,attempts,created_at,updated_at)
+         VALUES (:job,'downloading',1,'pending',0,UTC_TIMESTAMP(),UTC_TIMESTAMP()),
+                (:job,'completed',2,'pending',0,UTC_TIMESTAMP(),UTC_TIMESTAMP())"
+    )->execute(['job' => $updateJob['id']]);
     $pdo->exec("UPDATE update_jobs SET status='failed' WHERE id<>" . (int) $updateJob['id'] . " AND status IN ('queued','running','validating','backing_up','downloading','installing','migrating','verifying','rolling_back')");
-    $pdo->prepare("UPDATE update_steps SET status='completed',completed_at=COALESCE(completed_at,UTC_TIMESTAMP()) WHERE job_id=:job")
-        ->execute(['job' => $updateJob['id']]);
-    $pdo->prepare("UPDATE update_steps SET status='pending',completed_at=NULL,receipt_hash=NULL,last_error_code=NULL,last_error_message=NULL WHERE job_id=:job AND stage='downloading'")
-        ->execute(['job' => $updateJob['id']]);
-    $pdo->prepare("UPDATE update_jobs SET status='queued',attempts=0,current_stage=NULL,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,completed_at=NULL,last_error_code=NULL,last_error_message=NULL WHERE id=:id")
-        ->execute(['id' => $updateJob['id']]);
-    $pdo->prepare("DELETE FROM update_receipts WHERE job_id=:job AND operation='downloading'")
-        ->execute(['job' => $updateJob['id']]);
-    $updateReceiptBefore = (int) $pdo->query("SELECT COUNT(*) FROM update_receipts WHERE job_id=" . (int) $updateJob['id'] . " AND operation='downloading'")->fetchColumn();
+    $updateReceiptBefore = 0;
     $updateAdapter = new Phase11AUpdateLeaseAdapter($pdo);
     $updateService = new SoftwareUpdateService($database, $updateAdapter, 60);
     $updateLost = $updateService->processNext('phase11a-update-loss-worker');
@@ -382,7 +402,10 @@ try {
     $updateAdapter->stealLease = false;
     $pdo->prepare('UPDATE update_jobs SET locked_until=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 MINUTE) WHERE id=:id')->execute(['id' => $updateJob['id']]);
     $updateRecovered = $updateService->processNext('phase11a-update-recovery-worker');
-    $assert(($updateRecovered['job_id'] ?? null) === (int) $updateJob['id'] && ($updateRecovered['status'] ?? null) === 'completed', 'Lease-lost update job could not be recovered.');
+    $assert(
+        ($updateRecovered['job_id'] ?? null) === (int) $updateJob['id'] && ($updateRecovered['status'] ?? null) === 'completed',
+        'Lease-lost update job could not be recovered: ' . json_encode($updateRecovered, JSON_UNESCAPED_SLASHES)
+    );
 
     // Infrastructure provider results cannot create allocation records after lease theft.
     $pdo->prepare("UPDATE pod_deployments SET status='active',routing_status='active',ssl_status='active',license_status='active',updated_at=UTC_TIMESTAMP() WHERE id=:id")
