@@ -29,13 +29,19 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
           coverage: none
-      - name: Validate Composer and runtime platform contract
+      - id: platform
+        name: Validate Composer and runtime platform contract
+        continue-on-error: true
         run: |
           composer validate --strict --no-check-publish
           php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
-      - name: Validate PHP syntax
+      - id: syntax
+        name: Validate PHP syntax
+        continue-on-error: true
         run: find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
-      - name: Run retained static certification
+      - id: retained
+        name: Run retained static certification
+        continue-on-error: true
         run: |
           php tests/run.php
           php tests/phase3_contract.php
@@ -48,26 +54,42 @@ jobs:
           php tests/phase10_contract.php
           php tests/phase11a_contract.php
           php tests/phase11a_runtime.php
-      - name: Run Phase 11B static and runtime certification
+      - id: phase11b
+        name: Run Phase 11B static and runtime certification
+        continue-on-error: true
         run: |
           php tests/phase11b_contract.php
           php tests/phase11b_runtime.php
-      - name: Publish PHP certification status
+      - name: Publish PHP stage statuses
         if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          STATUS_CONTEXT: phase11b/php-${{ matrix.php }}
-          STATUS_RESULT: ${{ job.status }}
+          PLATFORM: ${{ steps.platform.outcome }}
+          SYNTAX: ${{ steps.syntax.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+          VERSION: ${{ matrix.php }}
         run: |
-          state="$STATUS_RESULT"
-          if [ "$state" != "success" ]; then state="failure"; fi
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"${state}\",\"context\":\"${STATUS_CONTEXT}\",\"description\":\"Phase 11B PHP ${state}\"}"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/platform" "$PLATFORM" "PHP ${VERSION} platform"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/syntax" "$SYNTAX" "PHP ${VERSION} syntax"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/retained" "$RETAINED" "PHP ${VERSION} retained tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}/phase11b" "$PHASE11B" "PHP ${VERSION} Phase 11B tests"
+          aggregate=success
+          if [[ "$PLATFORM" != success || "$SYNTAX" != success || "$RETAINED" != success || "$PHASE11B" != success ]]; then aggregate=failure; fi
+          bash .github/scripts/publish-commit-status.sh "phase11b/php-${VERSION}" "$aggregate" "Phase 11B PHP ${VERSION}"
+      - name: Enforce PHP certification
+        if: always()
+        env:
+          PLATFORM: ${{ steps.platform.outcome }}
+          SYNTAX: ${{ steps.syntax.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+        run: |
+          [[ "$PLATFORM" == success ]]
+          [[ "$SYNTAX" == success ]]
+          [[ "$RETAINED" == success ]]
+          [[ "$PHASE11B" == success ]]
 
   mysql8:
     runs-on: ubuntu-latest
@@ -93,12 +115,16 @@ jobs:
           coverage: none
       - name: Install MySQL client
         run: sudo apt-get update && sudo apt-get install -y mysql-client
-      - name: Import cumulative schema twice
+      - id: schema
+        name: Import cumulative schema twice
+        continue-on-error: true
         working-directory: database
         run: |
           mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained database certification
+      - id: retained
+        name: Run retained database certification
+        continue-on-error: true
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -114,28 +140,39 @@ jobs:
           php tests/phase9_database_integration.php
           php tests/phase10_database_integration.php
           php tests/phase11a_database_integration.php
-      - name: Run MySQL 8 Phase 11B certification
+      - id: phase11b
+        name: Run MySQL 8 Phase 11B certification
+        continue-on-error: true
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
           VP3_TEST_DB_PASSWORD: root
         run: php tests/phase11b_database_integration.php
-      - name: Publish MySQL certification status
+      - name: Publish MySQL stage statuses
         if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          STATUS_CONTEXT: phase11b/mysql8
-          STATUS_RESULT: ${{ job.status }}
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
         run: |
-          state="$STATUS_RESULT"
-          if [ "$state" != "success" ]; then state="failure"; fi
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"${state}\",\"context\":\"${STATUS_CONTEXT}\",\"description\":\"Phase 11B MySQL 8 ${state}\"}"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/schema" "$SCHEMA" "MySQL 8 schema"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/retained" "$RETAINED" "MySQL 8 retained tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8/phase11b" "$PHASE11B" "MySQL 8 Phase 11B tests"
+          aggregate=success
+          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success ]]; then aggregate=failure; fi
+          bash .github/scripts/publish-commit-status.sh "phase11b/mysql8" "$aggregate" "Phase 11B MySQL 8"
+      - name: Enforce MySQL certification
+        if: always()
+        env:
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+        run: |
+          [[ "$SCHEMA" == success ]]
+          [[ "$RETAINED" == success ]]
+          [[ "$PHASE11B" == success ]]
 
   mariadb1011:
     runs-on: ubuntu-latest
@@ -161,12 +198,16 @@ jobs:
           coverage: none
       - name: Install MariaDB client
         run: sudo apt-get update && sudo apt-get install -y mariadb-client
-      - name: Import cumulative schema twice
+      - id: schema
+        name: Import cumulative schema twice
+        continue-on-error: true
         working-directory: database
         run: |
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained database certification
+      - id: retained
+        name: Run retained database certification
+        continue-on-error: true
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -182,25 +223,36 @@ jobs:
           php tests/phase9_database_integration.php
           php tests/phase10_database_integration.php
           php tests/phase11a_database_integration.php
-      - name: Run MariaDB 10.11 Phase 11B certification
+      - id: phase11b
+        name: Run MariaDB 10.11 Phase 11B certification
+        continue-on-error: true
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
           VP3_TEST_DB_PASSWORD: root
         run: php tests/phase11b_database_integration.php
-      - name: Publish MariaDB certification status
+      - name: Publish MariaDB stage statuses
         if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          STATUS_CONTEXT: phase11b/mariadb1011
-          STATUS_RESULT: ${{ job.status }}
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
         run: |
-          state="$STATUS_RESULT"
-          if [ "$state" != "success" ]; then state="failure"; fi
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"${state}\",\"context\":\"${STATUS_CONTEXT}\",\"description\":\"Phase 11B MariaDB 10.11 ${state}\"}"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/schema" "$SCHEMA" "MariaDB 10.11 schema"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/retained" "$RETAINED" "MariaDB 10.11 retained tests"
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011/phase11b" "$PHASE11B" "MariaDB 10.11 Phase 11B tests"
+          aggregate=success
+          if [[ "$SCHEMA" != success || "$RETAINED" != success || "$PHASE11B" != success ]]; then aggregate=failure; fi
+          bash .github/scripts/publish-commit-status.sh "phase11b/mariadb1011" "$aggregate" "Phase 11B MariaDB 10.11"
+      - name: Enforce MariaDB certification
+        if: always()
+        env:
+          SCHEMA: ${{ steps.schema.outcome }}
+          RETAINED: ${{ steps.retained.outcome }}
+          PHASE11B: ${{ steps.phase11b.outcome }}
+        run: |
+          [[ "$SCHEMA" == success ]]
+          [[ "$RETAINED" == success ]]
+          [[ "$PHASE11B" == success ]]
