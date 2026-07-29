@@ -24,44 +24,46 @@ final class DatabaseSessionService
     /** @return array{token:string,public_id:string,inactivity_expires_at:string,absolute_expires_at:string} */
     public function create(int $userId, string $ip, string $userAgent, ?string $rotatedFromPublicId = null): array
     {
-        $token = $this->newToken();
-        $publicId = 'SES-' . strtoupper(bin2hex(random_bytes(12)));
-        $now = new DateTimeImmutable('now');
-        $inactivityExpiresAt = $now->modify('+' . $this->inactivityTtlSeconds . ' seconds');
-        $absoluteExpiresAt = $now->modify('+' . $this->absoluteTtlSeconds . ' seconds');
+        return $this->database->transaction(function (PDO $pdo) use ($userId, $ip, $userAgent, $rotatedFromPublicId): array {
+            $token = $this->newToken();
+            $publicId = 'SES-' . strtoupper(bin2hex(random_bytes(12)));
+            $now = new DateTimeImmutable('now');
+            $inactivityExpiresAt = $now->modify('+' . $this->inactivityTtlSeconds . ' seconds');
+            $absoluteExpiresAt = $now->modify('+' . $this->absoluteTtlSeconds . ' seconds');
 
-        $statement = $this->database->pdo()->prepare(
-            'INSERT INTO auth_sessions
-             (user_id, session_public_id, session_hash, ip_hash, user_agent_hash, last_seen_at, expires_at,
-              inactivity_expires_at, absolute_expires_at, rotated_from_public_id, updated_at, created_at)
-             VALUES (:user_id, :public_id, :session_hash, :ip_hash, :user_agent_hash, :last_seen_at, :expires_at,
-              :inactivity_expires_at, :absolute_expires_at, :rotated_from_public_id, :updated_at, :created_at)'
-        );
-        $statement->execute([
-            'user_id' => $userId,
-            'public_id' => $publicId,
-            'session_hash' => $this->hashToken($token),
-            'ip_hash' => $ip === '' ? null : hash('sha256', $ip),
-            'user_agent_hash' => $userAgent === '' ? null : hash('sha256', $userAgent),
-            'last_seen_at' => $now->format('Y-m-d H:i:s'),
-            'expires_at' => $absoluteExpiresAt->format('Y-m-d H:i:s'),
-            'inactivity_expires_at' => $inactivityExpiresAt->format('Y-m-d H:i:s'),
-            'absolute_expires_at' => $absoluteExpiresAt->format('Y-m-d H:i:s'),
-            'rotated_from_public_id' => $rotatedFromPublicId,
-            'updated_at' => $now->format('Y-m-d H:i:s'),
-            'created_at' => $now->format('Y-m-d H:i:s'),
-        ]);
-        $requestId = $this->audit->sessionEvent('created', $publicId, $userId, $ip, $userAgent, [
-            'rotated' => $rotatedFromPublicId !== null,
-        ]);
-        $this->audit->record('auth.session.created', 'success', $userId, null, 'auth_session', $publicId, [], $requestId);
+            $statement = $pdo->prepare(
+                'INSERT INTO auth_sessions
+                 (user_id, session_public_id, session_hash, ip_hash, user_agent_hash, last_seen_at, expires_at,
+                  inactivity_expires_at, absolute_expires_at, rotated_from_public_id, updated_at, created_at)
+                 VALUES (:user_id, :public_id, :session_hash, :ip_hash, :user_agent_hash, :last_seen_at, :expires_at,
+                  :inactivity_expires_at, :absolute_expires_at, :rotated_from_public_id, :updated_at, :created_at)'
+            );
+            $statement->execute([
+                'user_id' => $userId,
+                'public_id' => $publicId,
+                'session_hash' => $this->hashToken($token),
+                'ip_hash' => $ip === '' ? null : hash('sha256', $ip),
+                'user_agent_hash' => $userAgent === '' ? null : hash('sha256', $userAgent),
+                'last_seen_at' => $now->format('Y-m-d H:i:s'),
+                'expires_at' => $absoluteExpiresAt->format('Y-m-d H:i:s'),
+                'inactivity_expires_at' => $inactivityExpiresAt->format('Y-m-d H:i:s'),
+                'absolute_expires_at' => $absoluteExpiresAt->format('Y-m-d H:i:s'),
+                'rotated_from_public_id' => $rotatedFromPublicId,
+                'updated_at' => $now->format('Y-m-d H:i:s'),
+                'created_at' => $now->format('Y-m-d H:i:s'),
+            ]);
+            $requestId = $this->audit->sessionEvent('created', $publicId, $userId, $ip, $userAgent, [
+                'rotated' => $rotatedFromPublicId !== null,
+            ]);
+            $this->audit->record('auth.session.created', 'success', $userId, null, 'auth_session', $publicId, [], $requestId);
 
-        return [
-            'token' => $token,
-            'public_id' => $publicId,
-            'inactivity_expires_at' => $inactivityExpiresAt->format(DATE_ATOM),
-            'absolute_expires_at' => $absoluteExpiresAt->format(DATE_ATOM),
-        ];
+            return [
+                'token' => $token,
+                'public_id' => $publicId,
+                'inactivity_expires_at' => $inactivityExpiresAt->format(DATE_ATOM),
+                'absolute_expires_at' => $absoluteExpiresAt->format(DATE_ATOM),
+            ];
+        });
     }
 
     /** @return array{user:array{id:int,public_id:string,email:string,display_name:string,status:string},session:array{public_id:string,last_seen_at:string,inactivity_expires_at:string,absolute_expires_at:string,created_at:string}} */
@@ -84,7 +86,8 @@ final class DatabaseSessionService
         $statement->execute(['session_hash' => $this->hashToken($token)]);
         $row = $statement->fetch();
         if (!$row) {
-            $this->audit->sessionEvent('rejected', null, null, $ip, $userAgent, ['reason' => 'unknown_token']);
+            $requestId = $this->audit->sessionEvent('rejected', null, null, $ip, $userAgent, ['reason' => 'unknown_token']);
+            $this->audit->record('auth.session.rejected', 'denied', null, null, 'auth_session', null, ['reason' => 'unknown_token'], $requestId);
             throw new AuthPublicException('invalid_session', 'The session is invalid or expired.', 401);
         }
 
@@ -102,11 +105,13 @@ final class DatabaseSessionService
         $inactivity = new DateTimeImmutable((string) ($row['inactivity_expires_at'] ?: $row['expires_at']));
         $absolute = new DateTimeImmutable((string) ($row['absolute_expires_at'] ?: $row['expires_at']));
         if ($now >= $inactivity || $now >= $absolute) {
-            $this->revokeById((int) $row['id'], 'expired', $now);
-            $requestId = $this->audit->sessionEvent('expired', $publicId, $userId, $ip, $userAgent, [
-                'reason' => $now >= $absolute ? 'absolute' : 'inactivity',
-            ]);
-            $this->audit->record('auth.session.expired', 'denied', $userId, null, 'auth_session', $publicId, [], $requestId);
+            $this->database->transaction(function (PDO $transaction) use ($row, $publicId, $userId, $ip, $userAgent, $now, $absolute): void {
+                $this->revokeById((int) $row['id'], 'expired', $now);
+                $requestId = $this->audit->sessionEvent('expired', $publicId, $userId, $ip, $userAgent, [
+                    'reason' => $now >= $absolute ? 'absolute' : 'inactivity',
+                ]);
+                $this->audit->record('auth.session.expired', 'denied', $userId, null, 'auth_session', $publicId, [], $requestId);
+            });
             throw new AuthPublicException('invalid_session', 'The session is invalid or expired.', 401);
         }
 
@@ -114,8 +119,12 @@ final class DatabaseSessionService
         $uaHash = $userAgent === '' ? null : hash('sha256', $userAgent);
         if (($row['ip_hash'] !== null && !hash_equals((string) $row['ip_hash'], (string) $ipHash))
             || ($row['user_agent_hash'] !== null && !hash_equals((string) $row['user_agent_hash'], (string) $uaHash))) {
-            $this->revokeById((int) $row['id'], 'binding_mismatch', $now);
-            $this->reject($publicId, $userId, $ip, $userAgent, 'binding_mismatch');
+            $this->database->transaction(function (PDO $transaction) use ($row, $publicId, $userId, $ip, $userAgent, $now): void {
+                $this->revokeById((int) $row['id'], 'binding_mismatch', $now);
+                $requestId = $this->audit->sessionEvent('rejected', $publicId, $userId, $ip, $userAgent, ['reason' => 'binding_mismatch']);
+                $this->audit->record('auth.session.rejected', 'denied', $userId, null, 'auth_session', $publicId, ['reason' => 'binding_mismatch'], $requestId);
+            });
+            throw new AuthPublicException('invalid_session', 'The session is invalid or expired.', 401);
         }
 
         $nextInactivity = $now->modify('+' . $this->inactivityTtlSeconds . ' seconds');
@@ -157,7 +166,7 @@ final class DatabaseSessionService
     public function rotate(string $token, string $ip, string $userAgent): array
     {
         $current = $this->validate($token, $ip, $userAgent, false);
-        $rotated = $this->database->transaction(function (PDO $pdo) use ($token, $ip, $userAgent, $current): array {
+        return $this->database->transaction(function (PDO $pdo) use ($token, $ip, $userAgent, $current): array {
             $now = new DateTimeImmutable('now');
             $revoke = $pdo->prepare(
                 'UPDATE auth_sessions SET revoked_at = :revoked_at, revocation_reason = :reason, updated_at = :updated_at
@@ -197,6 +206,12 @@ final class DatabaseSessionService
                 'updated_at' => $now->format('Y-m-d H:i:s'),
                 'created_at' => $now->format('Y-m-d H:i:s'),
             ]);
+
+            $requestId = $this->audit->sessionEvent('rotated', $current['session']['public_id'], $current['user']['id'], $ip, $userAgent);
+            $this->audit->record('auth.session.rotated', 'success', $current['user']['id'], null, 'auth_session', $current['session']['public_id'], [], $requestId);
+            $createdRequestId = $this->audit->sessionEvent('created', $publicId, $current['user']['id'], $ip, $userAgent, ['rotated' => true]);
+            $this->audit->record('auth.session.created', 'success', $current['user']['id'], null, 'auth_session', $publicId, ['rotated' => true], $createdRequestId);
+
             return [
                 'token' => $newToken,
                 'public_id' => $publicId,
@@ -204,11 +219,6 @@ final class DatabaseSessionService
                 'absolute_expires_at' => $absoluteExpiresAt->format(DATE_ATOM),
             ];
         });
-
-        $requestId = $this->audit->sessionEvent('rotated', $current['session']['public_id'], $current['user']['id'], $ip, $userAgent);
-        $this->audit->record('auth.session.rotated', 'success', $current['user']['id'], null, 'auth_session', $current['session']['public_id'], [], $requestId);
-        $this->audit->sessionEvent('created', $rotated['public_id'], $current['user']['id'], $ip, $userAgent, ['rotated' => true]);
-        return $rotated;
     }
 
     /** @return list<array{public_id:string,last_seen_at:string,inactivity_expires_at:string,absolute_expires_at:string,created_at:string,current:bool}> */
@@ -243,58 +253,76 @@ final class DatabaseSessionService
 
     public function revokeSelected(int $actorUserId, string $sessionPublicId, string $ip, string $userAgent, string $reason = 'selected_device'): bool
     {
-        $now = new DateTimeImmutable('now');
-        $statement = $this->database->pdo()->prepare(
-            'UPDATE auth_sessions
-             SET revoked_at = :revoked_at, revocation_reason = :reason, revoked_by_user_id = :actor_user_id, updated_at = :updated_at
-             WHERE session_public_id = :public_id AND user_id = :user_id AND revoked_at IS NULL'
-        );
-        $statement->execute([
-            'revoked_at' => $now->format('Y-m-d H:i:s'),
-            'reason' => $reason,
-            'actor_user_id' => $actorUserId,
-            'updated_at' => $now->format('Y-m-d H:i:s'),
-            'public_id' => $sessionPublicId,
-            'user_id' => $actorUserId,
-        ]);
-        if ($statement->rowCount() < 1) {
-            $this->audit->record('auth.session.revocation_denied', 'denied', $actorUserId, null, 'auth_session', $sessionPublicId, ['reason' => 'not_found_or_cross_user']);
-            return false;
-        }
-        $requestId = $this->audit->sessionEvent('revoked', $sessionPublicId, $actorUserId, $ip, $userAgent, ['reason' => $reason]);
-        $this->audit->record('auth.session.revoked', 'success', $actorUserId, null, 'auth_session', $sessionPublicId, ['reason' => $reason], $requestId);
-        return true;
+        return $this->database->transaction(function (PDO $pdo) use ($actorUserId, $sessionPublicId, $ip, $userAgent, $reason): bool {
+            $now = new DateTimeImmutable('now');
+            $statement = $pdo->prepare(
+                'UPDATE auth_sessions
+                 SET revoked_at = :revoked_at, revocation_reason = :reason, revoked_by_user_id = :actor_user_id, updated_at = :updated_at
+                 WHERE session_public_id = :public_id AND user_id = :user_id AND revoked_at IS NULL'
+            );
+            $statement->execute([
+                'revoked_at' => $now->format('Y-m-d H:i:s'),
+                'reason' => $reason,
+                'actor_user_id' => $actorUserId,
+                'updated_at' => $now->format('Y-m-d H:i:s'),
+                'public_id' => $sessionPublicId,
+                'user_id' => $actorUserId,
+            ]);
+            if ($statement->rowCount() < 1) {
+                $this->audit->record('auth.session.revocation_denied', 'denied', $actorUserId, null, 'auth_session', $sessionPublicId, ['reason' => 'not_found_or_cross_user']);
+                return false;
+            }
+            $requestId = $this->audit->sessionEvent('revoked', $sessionPublicId, $actorUserId, $ip, $userAgent, ['reason' => $reason]);
+            $this->audit->record('auth.session.revoked', 'success', $actorUserId, null, 'auth_session', $sessionPublicId, ['reason' => $reason], $requestId);
+            if ($reason === 'logout') {
+                $this->audit->record('auth.logout', 'success', $actorUserId, null, 'auth_session', $sessionPublicId, [], $requestId);
+            }
+            return true;
+        });
     }
 
     public function revokeAllForUser(int $userId, string $reason, ?string $exceptPublicId = null, string $ip = '', string $userAgent = ''): int
     {
-        $now = new DateTimeImmutable('now');
-        $sql = 'UPDATE auth_sessions
-                SET revoked_at = :revoked_at, revocation_reason = :reason, revoked_by_user_id = :user_id, updated_at = :updated_at
-                WHERE user_id = :user_id AND revoked_at IS NULL';
-        $params = [
-            'revoked_at' => $now->format('Y-m-d H:i:s'),
-            'reason' => $reason,
-            'user_id' => $userId,
-            'updated_at' => $now->format('Y-m-d H:i:s'),
-        ];
-        if ($exceptPublicId !== null) {
-            $sql .= ' AND session_public_id <> :except_public_id';
-            $params['except_public_id'] = $exceptPublicId;
-        }
-        $statement = $this->database->pdo()->prepare($sql);
-        $statement->execute($params);
-        $count = $statement->rowCount();
-        $this->audit->record(
-            $exceptPublicId === null ? 'auth.logout_all' : 'auth.logout_others',
-            'success',
-            $userId,
-            null,
-            'user',
-            null,
-            ['revoked_count' => $count, 'reason' => $reason]
-        );
-        return $count;
+        return $this->database->transaction(function (PDO $pdo) use ($userId, $reason, $exceptPublicId, $ip, $userAgent): int {
+            $selectSql = 'SELECT session_public_id FROM auth_sessions WHERE user_id = :user_id AND revoked_at IS NULL';
+            $selectParams = ['user_id' => $userId];
+            if ($exceptPublicId !== null) {
+                $selectSql .= ' AND session_public_id <> :except_public_id';
+                $selectParams['except_public_id'] = $exceptPublicId;
+            }
+            $selectSql .= ' FOR UPDATE';
+            $select = $pdo->prepare($selectSql);
+            $select->execute($selectParams);
+            $publicIds = array_map(static fn (array $row): string => (string) $row['session_public_id'], $select->fetchAll());
+
+            $now = new DateTimeImmutable('now');
+            $updateSql = 'UPDATE auth_sessions
+                          SET revoked_at = :revoked_at, revocation_reason = :reason, revoked_by_user_id = :user_id, updated_at = :updated_at
+                          WHERE user_id = :user_id AND revoked_at IS NULL';
+            $updateParams = [
+                'revoked_at' => $now->format('Y-m-d H:i:s'),
+                'reason' => $reason,
+                'user_id' => $userId,
+                'updated_at' => $now->format('Y-m-d H:i:s'),
+            ];
+            if ($exceptPublicId !== null) {
+                $updateSql .= ' AND session_public_id <> :except_public_id';
+                $updateParams['except_public_id'] = $exceptPublicId;
+            }
+            $statement = $pdo->prepare($updateSql);
+            $statement->execute($updateParams);
+
+            foreach ($publicIds as $publicId) {
+                $requestId = $this->audit->sessionEvent('revoked', $publicId, $userId, $ip, $userAgent, ['reason' => $reason]);
+                $this->audit->record('auth.session.revoked', 'success', $userId, null, 'auth_session', $publicId, ['reason' => $reason], $requestId);
+            }
+            $eventType = $exceptPublicId === null ? 'auth.logout_all' : 'auth.logout_others';
+            $this->audit->record($eventType, 'success', $userId, null, 'user', null, [
+                'revoked_count' => count($publicIds),
+                'reason' => $reason,
+            ]);
+            return count($publicIds);
+        });
     }
 
     private function reject(string $publicId, int $userId, string $ip, string $userAgent, string $reason): never
