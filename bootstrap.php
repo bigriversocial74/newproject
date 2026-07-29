@@ -7,6 +7,7 @@ use Vp3\Auth\AuthService;
 use Vp3\Auth\PasswordPolicy;
 use Vp3\Database;
 use Vp3\Http\SessionManager;
+use Vp3\Licensing\DomainLicenseBundleService;
 
 $autoload = __DIR__ . '/vendor/autoload.php';
 if (!is_file($autoload)) {
@@ -34,6 +35,7 @@ $database = new Database($config['database']);
 $passwordPolicy = new PasswordPolicy((int) $config['auth']['password_min_length']);
 $auth = new AuthService($database, $passwordPolicy);
 $accountSecurity = new AccountSecurityService($database, $passwordPolicy);
+$domainLicenseBundles = new DomainLicenseBundleService($database);
 $session = new SessionManager([
     'name' => (string) $config['app']['session_name'],
     'secure' => (bool) $config['app']['session_secure'],
@@ -44,5 +46,6 @@ return [
     'database' => $database,
     'auth' => $auth,
     'account_security' => $accountSecurity,
+    'domain_license_bundles' => $domainLicenseBundles,
     'session' => $session,
 ];
