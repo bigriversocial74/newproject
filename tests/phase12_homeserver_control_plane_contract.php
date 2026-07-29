@@ -41,14 +41,14 @@ $assert(str_contains($endpoint, 'MAX_JSON_BYTES = 65536'), 'HomeServer JSON body
 $assert(str_contains($endpoint, 'Bearer\\s+'), 'Bearer device authentication is missing.');
 $assert(str_contains($endpoint, 'assertCsrf'), 'Account mutation CSRF enforcement is missing.');
 $assert(str_contains($endpoint, "role IN ('owner','administrator')"), 'Account owner/administrator authorization is missing.');
-$assert(str_contains($service, "hash('sha256', $token)"), 'Installer grant hashing is missing.');
+$assert(str_contains($service, "hash('sha256', \$token)"), 'Installer grant hashing is missing.');
 $assert(!str_contains($migration, 'credential TEXT') && !str_contains($migration, 'token TEXT'), 'Plaintext credentials or grant tokens are stored.');
 $assert(str_contains($migration, 'token_hash CHAR(64)'), 'Installer grant token hash column is missing.');
 $assert(str_contains($migration, "status ENUM('active','consumed','expired','revoked')"), 'Installer grant lifecycle is incomplete.');
 $assert(str_contains($migration, 'homeserver_transfer_requests'), 'HomeServer transfer schema is missing.');
 $assert(str_contains($migration, 'homeserver_update_receipts_v1'), 'HomeServer update receipt schema is missing.');
 $assert(str_contains($installer, '20260729_phase12_homeserver_control_plane.sql'), 'Cumulative installer omits Phase 12.');
-$assert(str_contains($download, "str_contains($reference, '..')"), 'Installer traversal rejection is missing.');
+$assert(str_contains($download, "str_contains(\$reference, '..')"), 'Installer traversal rejection is missing.');
 $assert(str_contains($download, "preg_match('#^[a-z]+://#i'"), 'Remote installer URL rejection is missing.');
 $assert(str_contains($download, "hash_file('sha256'"), 'Installer SHA-256 verification is missing.');
 $assert(str_contains($download, 'X-Content-Type-Options: nosniff'), 'Installer download hardening headers are missing.');
