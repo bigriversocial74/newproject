@@ -1,0 +1,178 @@
+SET NAMES utf8mb4;
+SET time_zone = '+00:00';
+
+CREATE TABLE IF NOT EXISTS provider_connections (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    public_id VARCHAR(48) NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    provider_type ENUM('hosting','dns','certificate') NOT NULL,
+    provider_code VARCHAR(80) NOT NULL,
+    display_name VARCHAR(190) NOT NULL,
+    status ENUM('active','disabled','revoked') NOT NULL DEFAULT 'active',
+    credentials_ciphertext LONGTEXT NOT NULL,
+    credentials_nonce VARCHAR(64) NOT NULL,
+    credentials_tag VARCHAR(64) NOT NULL,
+    encryption_key_id VARCHAR(80) NOT NULL,
+    credential_version INT UNSIGNED NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    UNIQUE KEY uq_provider_connection_public (public_id),
+    UNIQUE KEY uq_provider_connection_account_code (account_id, provider_type, provider_code),
+    KEY idx_provider_connection_account_status (account_id, status),
+    CONSTRAINT fk_provider_connection_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS infrastructure_bindings (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    public_id VARCHAR(48) NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    deployment_id BIGINT UNSIGNED NOT NULL,
+    hosting_connection_id BIGINT UNSIGNED NOT NULL,
+    dns_connection_id BIGINT UNSIGNED NOT NULL,
+    certificate_connection_id BIGINT UNSIGNED NOT NULL,
+    hostname VARCHAR(253) NOT NULL,
+    status ENUM('pending','provisioning','active','degraded','tearing_down','disabled','failed') NOT NULL DEFAULT 'pending',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    activated_at DATETIME NULL,
+    disabled_at DATETIME NULL,
+    UNIQUE KEY uq_infrastructure_binding_public (public_id),
+    UNIQUE KEY uq_infrastructure_binding_deployment (deployment_id),
+    UNIQUE KEY uq_infrastructure_binding_hostname (hostname),
+    KEY idx_infrastructure_binding_account_status (account_id, status),
+    CONSTRAINT fk_infrastructure_binding_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_infrastructure_binding_deployment FOREIGN KEY (deployment_id) REFERENCES pod_deployments(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_infrastructure_binding_hosting_connection FOREIGN KEY (hosting_connection_id) REFERENCES provider_connections(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_infrastructure_binding_dns_connection FOREIGN KEY (dns_connection_id) REFERENCES provider_connections(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_infrastructure_binding_certificate_connection FOREIGN KEY (certificate_connection_id) REFERENCES provider_connections(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS hosting_allocations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    binding_id BIGINT UNSIGNED NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    provider_reference_ciphertext LONGTEXT NOT NULL,
+    provider_reference_nonce VARCHAR(64) NOT NULL,
+    provider_reference_tag VARCHAR(64) NOT NULL,
+    encryption_key_id VARCHAR(80) NOT NULL,
+    region VARCHAR(80) NULL,
+    service_plan_hash CHAR(64) NULL,
+    endpoint_hash CHAR(64) NULL,
+    status ENUM('pending','active','degraded','releasing','released','failed') NOT NULL DEFAULT 'pending',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    released_at DATETIME NULL,
+    UNIQUE KEY uq_hosting_allocation_binding (binding_id),
+    CONSTRAINT fk_hosting_allocation_binding FOREIGN KEY (binding_id) REFERENCES infrastructure_bindings(id) ON DELETE CASCADE,
+    CONSTRAINT fk_hosting_allocation_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS dns_bindings (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    binding_id BIGINT UNSIGNED NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    record_name VARCHAR(253) NOT NULL,
+    record_type ENUM('A','AAAA','CNAME') NOT NULL,
+    record_value_hash CHAR(64) NOT NULL,
+    provider_reference_ciphertext LONGTEXT NOT NULL,
+    provider_reference_nonce VARCHAR(64) NOT NULL,
+    provider_reference_tag VARCHAR(64) NOT NULL,
+    encryption_key_id VARCHAR(80) NOT NULL,
+    status ENUM('pending','active','degraded','removing','removed','failed') NOT NULL DEFAULT 'pending',
+    last_verified_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_dns_binding_target (binding_id, record_name, record_type),
+    CONSTRAINT fk_dns_binding_binding FOREIGN KEY (binding_id) REFERENCES infrastructure_bindings(id) ON DELETE CASCADE,
+    CONSTRAINT fk_dns_binding_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS certificate_orders (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    binding_id BIGINT UNSIGNED NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    domains_hash CHAR(64) NOT NULL,
+    provider_reference_ciphertext LONGTEXT NOT NULL,
+    provider_reference_nonce VARCHAR(64) NOT NULL,
+    provider_reference_tag VARCHAR(64) NOT NULL,
+    encryption_key_id VARCHAR(80) NOT NULL,
+    status ENUM('pending','active','renewing','degraded','revoking','revoked','failed') NOT NULL DEFAULT 'pending',
+    issued_at DATETIME NULL,
+    expires_at DATETIME NULL,
+    last_verified_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_certificate_order_binding (binding_id),
+    CONSTRAINT fk_certificate_order_binding FOREIGN KEY (binding_id) REFERENCES infrastructure_bindings(id) ON DELETE CASCADE,
+    CONSTRAINT fk_certificate_order_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS provider_operations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    public_id VARCHAR(48) NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    binding_id BIGINT UNSIGNED NOT NULL,
+    operation_type ENUM('provision','reconcile','teardown') NOT NULL,
+    status ENUM('queued','running','hosting','dns','certificate','verifying','completed','failed','paused','canceled') NOT NULL DEFAULT 'queued',
+    current_stage VARCHAR(80) NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_id VARCHAR(64) NOT NULL,
+    attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    max_attempts SMALLINT UNSIGNED NOT NULL DEFAULT 5,
+    available_at DATETIME NOT NULL,
+    locked_at DATETIME NULL,
+    locked_by VARCHAR(128) NULL,
+    started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    last_error_code VARCHAR(100) NULL,
+    last_error_message VARCHAR(1000) NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_provider_operation_public (public_id),
+    UNIQUE KEY uq_provider_operation_idempotency (account_id, idempotency_key),
+    KEY idx_provider_operation_claim (status, available_at, id),
+    KEY idx_provider_operation_binding (binding_id, created_at),
+    CONSTRAINT fk_provider_operation_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_provider_operation_binding FOREIGN KEY (binding_id) REFERENCES infrastructure_bindings(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS provider_operation_steps (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    operation_id BIGINT UNSIGNED NOT NULL,
+    stage VARCHAR(80) NOT NULL,
+    sequence_no SMALLINT UNSIGNED NOT NULL,
+    status ENUM('pending','running','completed','failed','skipped','rolled_back') NOT NULL DEFAULT 'pending',
+    attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    receipt_hash CHAR(64) NULL,
+    started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    rolled_back_at DATETIME NULL,
+    last_error_code VARCHAR(100) NULL,
+    last_error_message VARCHAR(1000) NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_provider_step_operation_stage (operation_id, stage),
+    UNIQUE KEY uq_provider_step_operation_sequence (operation_id, sequence_no),
+    CONSTRAINT fk_provider_step_operation FOREIGN KEY (operation_id) REFERENCES provider_operations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS provider_receipts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    public_id VARCHAR(48) NOT NULL,
+    account_id BIGINT UNSIGNED NOT NULL,
+    operation_id BIGINT UNSIGNED NULL,
+    binding_id BIGINT UNSIGNED NULL,
+    request_id VARCHAR(64) NOT NULL,
+    operation VARCHAR(100) NOT NULL,
+    result ENUM('success','failure','denied','ignored') NOT NULL,
+    receipt_hash CHAR(64) NULL,
+    metadata_json JSON NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE KEY uq_provider_receipt_public (public_id),
+    KEY idx_provider_receipt_account_time (account_id, created_at),
+    KEY idx_provider_receipt_operation_time (operation_id, created_at),
+    CONSTRAINT fk_provider_receipt_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_provider_receipt_operation FOREIGN KEY (operation_id) REFERENCES provider_operations(id) ON DELETE SET NULL,
+    CONSTRAINT fk_provider_receipt_binding FOREIGN KEY (binding_id) REFERENCES infrastructure_bindings(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
