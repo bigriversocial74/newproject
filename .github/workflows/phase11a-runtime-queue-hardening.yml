@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: phase11a-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: phase11a-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   php:
