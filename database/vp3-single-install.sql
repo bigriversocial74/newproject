@@ -15,3 +15,4 @@ SOURCE migrations/20260729_phase10_operations_readiness.sql;
 
 SOURCE migrations/20260729_phase11a_runtime_queue_hardening.sql;
 SOURCE migrations/20260729_phase11b_identity_authentication_completion.sql;
+SOURCE migrations/20260729_phase11b_identity_authentication_integrity.sql;
