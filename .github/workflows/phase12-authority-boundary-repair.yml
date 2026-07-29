@@ -6,6 +6,9 @@ on:
       - feature/vp3-homeserver-control-plane-v1-20260729
     paths:
       - .github/workflows/phase12-authority-boundary-repair.yml
+  pull_request:
+    paths:
+      - .github/workflows/phase12-authority-boundary-repair.yml
 
 permissions:
   contents: write
