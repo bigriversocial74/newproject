@@ -1,0 +1,29 @@
+name: Extract VP3 Specifications
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode specification package
+        run: |
+          set -euo pipefail
+          cat docs/vp3-platform-backend/package/vp3-backend-build-plan-final.zip.b64.part-* | base64 --decode > /tmp/vp3-backend-build-plan-final.zip
+          unzip -t /tmp/vp3-backend-build-plan-final.zip
+          mkdir -p /tmp/vp3-specs
+          unzip -q /tmp/vp3-backend-build-plan-final.zip -d /tmp/vp3-specs
+          find /tmp/vp3-specs -maxdepth 3 -type f -print
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vp3-backend-specifications
+          path: /tmp/vp3-specs
+          if-no-files-found: error
+          retention-days: 1
