@@ -198,6 +198,11 @@ final class OperationalNotificationService
             throw new RuntimeException('An operational notification worker ID is required.');
         }
         $notification = $this->database->transaction(function (PDO $pdo) use ($workerId): ?array {
+            $pdo->exec(
+                "UPDATE operational_notifications
+                 SET status='queued',locked_at=NULL,locked_by=NULL,available_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP()
+                 WHERE status='running' AND locked_at<DATE_SUB(UTC_TIMESTAMP(),INTERVAL 15 MINUTE)"
+            );
             $claim = $pdo->query(
                 "SELECT n.*,i.public_id AS incident_public_id,i.account_scope,i.title,
                         c.channel_type,c.label,c.destination_ciphertext,c.destination_nonce,c.destination_tag

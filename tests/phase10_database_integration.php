@@ -134,6 +134,23 @@ try {
     $pdo->exec("UPDATE operational_notifications SET available_at=UTC_TIMESTAMP() WHERE status='queued'");
     $retrySuccess = $service->processNextNotification('phase10-worker');
     $assert(($retrySuccess['status'] ?? null) === 'delivered', 'Queued notification retry was not delivered.');
+    while ($service->processNextNotification('phase10-drain') !== null) {
+        $pdo->exec("UPDATE operational_notifications SET available_at=UTC_TIMESTAMP() WHERE status='queued'");
+    }
+    $staleIncident = $service->openIncident($accountId, 'manual_test', 4, 'warning', 'Stale notification incident', ['token' => $token]);
+    $staleNotificationId = (int) $pdo->query(
+        'SELECT id FROM operational_notifications WHERE incident_id=' . $staleIncident['incident_id'] . ' ORDER BY id DESC LIMIT 1'
+    )->fetchColumn();
+    $pdo->exec(
+        "UPDATE operational_notifications SET status='running',locked_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 30 MINUTE),
+         locked_by='crashed-worker' WHERE id=" . $staleNotificationId
+    );
+    $staleRecovered = $service->processNextNotification('phase10-recovery');
+    $assert(
+        ($staleRecovered['notification_id'] ?? null) === $staleNotificationId
+        && ($staleRecovered['status'] ?? null) === 'delivered',
+        'Stale claimed notification was not recovered and delivered.'
+    );
 
     $service->recordHealthSignal($accountId, 'synthetic_runtime', 77, false, 'critical', ['probe' => 'failed'], 'REQ-P10-SIGNAL-BAD');
     $monitorBad = $service->runMonitoringPass('phase10-monitor');
