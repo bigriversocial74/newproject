@@ -368,6 +368,8 @@ try {
         ->execute(['job' => $updateJob['id']]);
     $pdo->prepare("UPDATE update_jobs SET status='queued',attempts=0,current_stage=NULL,available_at=UTC_TIMESTAMP(),locked_at=NULL,locked_by=NULL,locked_until=NULL,lease_token=NULL,completed_at=NULL,last_error_code=NULL,last_error_message=NULL WHERE id=:id")
         ->execute(['id' => $updateJob['id']]);
+    $pdo->prepare("DELETE FROM update_receipts WHERE job_id=:job AND operation='downloading'")
+        ->execute(['job' => $updateJob['id']]);
     $updateReceiptBefore = (int) $pdo->query("SELECT COUNT(*) FROM update_receipts WHERE job_id=" . (int) $updateJob['id'] . " AND operation='downloading'")->fetchColumn();
     $updateAdapter = new Phase11AUpdateLeaseAdapter($pdo);
     $updateService = new SoftwareUpdateService($database, $updateAdapter, 60);
@@ -383,6 +385,8 @@ try {
     $assert(($updateRecovered['job_id'] ?? null) === (int) $updateJob['id'] && ($updateRecovered['status'] ?? null) === 'completed', 'Lease-lost update job could not be recovered.');
 
     // Infrastructure provider results cannot create allocation records after lease theft.
+    $pdo->prepare("UPDATE pod_deployments SET status='active',routing_status='active',ssl_status='active',license_status='active',updated_at=UTC_TIMESTAMP() WHERE id=:id")
+        ->execute(['id' => $podJob['deployment_id']]);
     $deploymentStatement = $pdo->prepare(
         "SELECT p.id,p.account_id,d.hostname FROM pod_deployments p
          JOIN domain_registrations d ON d.id=p.domain_registration_id
