@@ -11,7 +11,11 @@ ControlCenterEndpoint::requireMethod('POST');
 
 try {
     $payload = ControlCenterEndpoint::payload();
-    $account = ControlCenterEndpoint::accountContext($container, $payload);
+    $account = ControlCenterEndpoint::accountContext(
+        $container,
+        $payload,
+        ['customer_owner', 'customer_admin', 'billing_manager']
+    );
     $query = new AccountBillingQueryService($container['database']);
     JsonResponse::send(['data' => $query->snapshot($account['account_id'])]);
 } catch (Throwable $exception) {
