@@ -29,6 +29,9 @@ final class ControlCenterUrl
             if (!preg_match('/^[A-Za-z][A-Za-z0-9_-]{0,63}$/', (string) $key)) {
                 throw new InvalidArgumentException('A valid Control Center query key is required.');
             }
+            if ($value !== null && !is_scalar($value)) {
+                throw new InvalidArgumentException('Control Center query values must be scalar.');
+            }
             if ($value !== null) {
                 $parameters[(string) $key] = $value;
             }
@@ -46,8 +49,10 @@ final class ControlCenterUrl
         if (!is_array($parts)
             || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
             || trim((string) ($parts['host'] ?? '')) === ''
-            || isset($parts['user'], $parts['pass'])
-            || isset($parts['query'], $parts['fragment'])) {
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || isset($parts['query'])
+            || isset($parts['fragment'])) {
             throw new InvalidArgumentException('A valid secure VP3 base URL is required.');
         }
         return $baseUrl . self::relative($path, $accountPublicId, $query);
