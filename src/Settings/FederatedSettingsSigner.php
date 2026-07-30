@@ -18,7 +18,7 @@ final class FederatedSettingsSigner
     /** @param array<string,mixed> $snapshot @return array<string,mixed> */
     public function sign(array $snapshot): array
     {
-        foreach (['schema', 'account_id', 'device_public_id', 'max_revision', 'settings', 'snapshot_hash'] as $required) {
+        foreach (['schema', 'account_id', 'device_public_id', 'max_revision', 'settings', 'generated_at', 'snapshot_hash'] as $required) {
             if (!array_key_exists($required, $snapshot)) {
                 throw new RuntimeException('The federated settings snapshot is incomplete.');
             }
@@ -26,18 +26,30 @@ final class FederatedSettingsSigner
         if ($this->signer->algorithm() !== 'Ed25519') {
             throw new RuntimeException('Federated settings require the production Ed25519 HomeServer signing key.');
         }
+        $normalized = $snapshot + [
+            'replayed' => false,
+            'applied' => [],
+            'conflicts' => [],
+        ];
+        if (!is_bool($normalized['replayed']) || !is_array($normalized['applied']) || !is_array($normalized['conflicts'])) {
+            throw new RuntimeException('The federated settings sync result is invalid.');
+        }
         $issuedAt = time();
         $signed = $this->signer->sign([
-            'schema' => (string) $snapshot['schema'],
-            'account_id' => (int) $snapshot['account_id'],
-            'device_public_id' => $snapshot['device_public_id'] === null ? null : (string) $snapshot['device_public_id'],
-            'max_revision' => max(0, (int) $snapshot['max_revision']),
-            'snapshot_hash' => strtolower((string) $snapshot['snapshot_hash']),
-            'settings' => $snapshot['settings'],
+            'schema' => (string) $normalized['schema'],
+            'account_id' => (int) $normalized['account_id'],
+            'device_public_id' => $normalized['device_public_id'] === null ? null : (string) $normalized['device_public_id'],
+            'max_revision' => max(0, (int) $normalized['max_revision']),
+            'snapshot_hash' => strtolower((string) $normalized['snapshot_hash']),
+            'generated_at' => (string) $normalized['generated_at'],
+            'settings' => $normalized['settings'],
+            'replayed' => $normalized['replayed'],
+            'applied' => $normalized['applied'],
+            'conflicts' => $normalized['conflicts'],
             'iat' => $issuedAt,
             'exp' => $issuedAt + self::MAX_LIFETIME_SECONDS,
         ]);
-        return $snapshot + [
+        return $normalized + [
             'signed_document' => $signed['document'],
             'signature' => $signed['signature'],
             'signing_key_id' => $signed['key_id'],
