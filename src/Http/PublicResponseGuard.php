@@ -59,6 +59,26 @@ final class PublicResponseGuard
         return self::$enabled;
     }
 
+    /**
+     * Remove internal database identifiers from a public response while preserving
+     * public identities, request identities, signing-key identities, counts, limits,
+     * monetary values and other customer-visible numeric data.
+     *
+     * @param array<string|int,mixed> $payload
+     * @return array<string|int,mixed>
+     */
+    public static function sanitize(array $payload): array
+    {
+        $safe = [];
+        foreach ($payload as $key => $child) {
+            if (is_string($key) && isset(self::FORBIDDEN_KEYS[$key])) {
+                continue;
+            }
+            $safe[$key] = is_array($child) ? self::sanitize($child) : $child;
+        }
+        return $safe;
+    }
+
     /** @param array<string|int,mixed> $payload */
     public static function assertSafe(array $payload): void
     {
