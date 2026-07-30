@@ -26,7 +26,9 @@ $required = [
     'src/Infrastructure/InfrastructureControlCenterQueryService.php',
     'src/Infrastructure/InfrastructureControlCenterActionService.php',
     'tests/phase20_infrastructure_control_center_database_integration.php',
+    'tests/phase20_infrastructure_stale_role_database_integration.php',
     '.github/workflows/phase20-infrastructure-control-center.yml',
+    '.github/workflows/phase20-infrastructure-stale-role.yml',
 ];
 foreach ($required as $path) {
     $assert(is_file($root . '/' . $path), 'Missing Phase 20 file: ' . $path);
@@ -50,6 +52,9 @@ $assert(str_contains($actions, "\$confirmation !== 'TEARDOWN'"), 'Infrastructure
 $assert(str_contains($actions, 'provider_operation_steps'), 'Infrastructure queueing does not create durable operation stages.');
 $assert(str_contains($actions, 'credentials_ciphertext'), 'Provider credentials are not encrypted into the production schema.');
 $assert(str_contains($actions, 'infrastructure_permission_denied'), 'Denied infrastructure actions do not use a stable public code.');
+$staleRole = $read('tests/phase20_infrastructure_stale_role_database_integration.php');
+$assert(str_contains($staleRole, "'customer_admin'"), 'Phase 20 lacks an executable stale-role mismatch proof.');
+$assert(str_contains($staleRole, 'provider_receipts'), 'Stale-role denial evidence is not checked in provider receipts.');
 $assert(str_contains($nav, "'infrastructure' => ['/infrastructure.php', 'Infrastructure']"), 'Control Center navigation omits Infrastructure.');
 $assert(str_contains($js, "credentials: 'same-origin'"), 'Infrastructure browser API calls are not same-origin credentialed.');
 $assert(!str_contains($js, 'localStorage') && !str_contains($js, 'sessionStorage'), 'Infrastructure UI persists sensitive state in browser storage.');
