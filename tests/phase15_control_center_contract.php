@@ -13,6 +13,7 @@ $read = static function (string $path) use ($root): string {
 $context = $read('src/ControlCenter/AccountPageContext.php');
 $resolver = $read('src/ControlCenter/PublicAccountIdentityResolver.php');
 $shell = $read('src/ControlCenter/ControlCenterPage.php');
+$urlBuilder = $read('src/ControlCenter/ControlCenterUrl.php');
 $query = $read('src/ControlCenter/AccountControlCenterQueryService.php');
 $endpoint = $read('src/Http/ControlCenterEndpoint.php');
 $overview = $read('public/api/control-center/v1/overview.php');
@@ -39,7 +40,7 @@ $assert(str_contains($shell, "'dashboard' => ['/dashboard.php'"), 'Shared shell 
 $assert(str_contains($shell, "'domains' => ['/domains.php'"), 'Shared shell does not expose Domains.');
 $assert(str_contains($shell, "'pods' => ['/pods.php'"), 'Shared shell does not expose PODs.');
 $assert(str_contains($shell, "'homeservers' => ['/homeservers.php'"), 'Shared shell does not expose HomeServers.');
-$assert(str_contains($shell, '?account='), 'Shared shell does not emit public account routes.');
+$assert(str_contains($shell, 'ControlCenterUrl::relative') && str_contains($urlBuilder, "['account' => \$accountPublicId]"), 'Shared shell does not emit validated public account routes.');
 $assert(str_contains($shell, 'data-account-public-id'), 'Shared shell omits the public account data boundary.');
 $assert(!str_contains($shell, 'data-account-id='), 'Shared shell exposes internal account IDs.');
 $assert(!str_contains($shell, '?account_id='), 'Shared shell emits numeric account routes.');
