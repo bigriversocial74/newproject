@@ -34,7 +34,7 @@ $fleetClient = $read('public/assets/homeserver-fleet.js');
 $transferClient = $read('public/assets/homeserver-transfer-accept.js');
 $styles = $read('public/assets/control-center.css');
 
-$assert(str_contains($context, "role IN ('owner','administrator')"), 'Shared account context does not require an owner or administrator role.');
+$assert(str_contains($context, "role IN ('customer_owner','customer_admin')"), 'Shared account context does not require a customer owner or administrator role.');
 $assert(str_contains($context, "a.status='active'"), 'Shared account context does not require an active account.');
 $assert(str_contains($context, 'AuthPublicException'), 'Account membership failure is not represented as a public access error.');
 $assert(str_contains($shell, "'dashboard' => ['/dashboard.php'"), 'Shared shell does not expose the Dashboard route.');
@@ -52,7 +52,7 @@ foreach ([$overview, $domainAction, $podAction] as $apiFile) {
     $assert(str_contains($apiFile, 'ControlCenterEndpoint::accountContext'), 'A Phase 15 API endpoint is not account authenticated and CSRF protected.');
 }
 $assert(str_contains($endpoint, 'MAX_JSON_BYTES = 65536'), 'Control Center JSON requests are not bounded.');
-$assert(str_contains($endpoint, "role IN ('owner','administrator')"), 'Control Center API account context permits unsupported roles.');
+$assert(str_contains($endpoint, "role IN ('customer_owner','customer_admin')"), 'Control Center API account context permits unsupported roles.');
 $assert(str_contains($endpoint, 'InvalidArgumentException'), 'Control Center API does not return stable validation errors.');
 
 $assert(str_contains($query, 'WHERE s.account_id=:account'), 'Subscription query is not account scoped.');
