@@ -20,8 +20,10 @@ $read = static function (string $path) use ($root): string {
 $required = [
     'src/Lifecycle/DomainPodLifecycleQueryService.php',
     'src/Lifecycle/DomainPodLifecycleActionService.php',
+    'src/Lifecycle/PodRollbackLifecycleService.php',
     'tests/phase21_nested_transaction_database_integration.php',
     'tests/phase21_domain_pod_lifecycle_database_integration.php',
+    'tests/phase21_failed_pod_rollback_database_integration.php',
     '.github/workflows/phase21-domain-pod-lifecycle.yml',
 ];
 foreach ($required as $path) {
@@ -31,6 +33,7 @@ foreach ($required as $path) {
 $database = $read('src/Database.php');
 $query = $read('src/Lifecycle/DomainPodLifecycleQueryService.php');
 $actions = $read('src/Lifecycle/DomainPodLifecycleActionService.php');
+$rollback = $read('src/Lifecycle/PodRollbackLifecycleService.php');
 $overview = $read('public/api/control-center/v1/overview.php');
 $domainApi = $read('public/api/control-center/v1/domain-action.php');
 $podApi = $read('public/api/control-center/v1/pod-action.php');
@@ -46,13 +49,15 @@ $assert(str_contains($actions, 'LIMIT 1 FOR UPDATE'), 'Lifecycle mutations do no
 $assert(str_contains($actions, 'hash_equals($storedRole, $role)'), 'Lifecycle mutations trust stale caller roles.');
 $assert(str_contains($actions, 'lifecycle_permission_denied'), 'Lifecycle authorization lacks a stable public denial code.');
 $assert(str_contains($actions, "\$confirmation !== 'RELEASE'"), 'Domain release lacks exact confirmation.');
-$assert(str_contains($actions, "\$confirmation !== 'ROLLBACK'"), 'POD rollback lacks exact confirmation.');
-$assert(str_contains($actions, 'OPEN_JOB_STATUSES'), 'POD rollback lacks one-open-job serialization.');
+$assert(str_contains($rollback, "\$confirmation !== 'ROLLBACK'"), 'POD rollback lacks exact confirmation.');
+$assert(str_contains($rollback, 'ACTIVE_JOB_STATUSES'), 'POD rollback lacks active-job serialization.');
+$assert(str_contains($rollback, "status='canceled'"), 'Failed POD work is not atomically replaced before rollback.');
 $assert(str_contains($actions, 'domain_request_receipts') || str_contains($actions, 'registerAndActivate'), 'Certified Domain idempotency logic is not retained.');
 $assert(str_contains($actions, '$this->pods->enqueue('), 'Certified POD provisioning service is not retained.');
 $assert(str_contains($overview, 'accountContextForRoles'), 'Lifecycle overview uses generic membership context.');
 $assert(str_contains($domainApi, 'accountContextForRoles'), 'Domain API uses generic membership context.');
 $assert(str_contains($podApi, 'accountContextForRoles'), 'POD API uses generic membership context.');
+$assert(str_contains($podApi, 'PodRollbackLifecycleService'), 'Active rollback endpoint bypasses failed-job replacement.');
 foreach ([$dashboard, $domainsPage, $podsPage] as $page) {
     $assert(str_contains($page, "resolveForRoles(\$container, ['customer_owner', 'customer_admin'])"), 'Lifecycle page is not owner/admin-only.');
 }
