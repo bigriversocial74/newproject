@@ -73,6 +73,7 @@ final class HomeServerEndpoint
     /** @return array{account_id:int,account_public_id:string,user:array<string,mixed>,session:array<string,mixed>} */
     public static function accountContext(array $container, array $payload): array
     {
+        PublicResponseGuard::enable();
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
         if (array_key_exists('account_id', $payload)) {
