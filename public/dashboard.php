@@ -9,8 +9,8 @@ use Vp3\ControlCenter\ControlCenterPage;
 $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
     $context = AccountPageContext::resolve($container);
-} catch (AuthPublicException) {
-    ControlCenterPage::renderSignInRequired('VP3 Dashboard');
+} catch (AuthPublicException $exception) {
+    ControlCenterPage::renderAccessFailure('VP3 Dashboard', $exception);
 }
 ControlCenterPage::renderStart(
     $context,
