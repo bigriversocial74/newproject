@@ -85,10 +85,15 @@ $assert(str_contains($auth, 'last_login_at=:last_login_at') && str_contains($aut
 $assert(str_contains($team, "hash('sha256', \$token)"), 'Invitation tokens are not stored as hashes.');
 $assert(str_contains($team, 'invited_email_normalized') && str_contains($team, 'email_normalized') && str_contains($team, 'hash_equals'), 'Invitation acceptance is not bound to the canonical invited email.');
 $assert(str_contains($team, "status='expired'") && str_contains($query, "THEN 'expired'"), 'Expired invitations are not represented explicitly.');
-$assert(str_contains($team, "return ['denied' => 'email_mismatch']") && str_contains($team, "team.invitation_accepted', 'denied'"), 'Invitation denial evidence is not committed before rejection.');
+$assert(
+    str_contains($team, "'team.invitation_accepted'")
+    && str_contains($team, "['reason' => 'email_mismatch']")
+    && str_contains($databaseTest, 'Invitation email-mismatch evidence did not persist.'),
+    'Invitation denial evidence is not committed before rejection.'
+);
 $assert(str_contains($team, 'assertAnotherOwner') && str_contains($team, 'team_final_owner_required'), 'Final-owner protection is missing.');
 $assert(str_contains($team, 'private function assertActor') && str_contains($team, "status='active' LIMIT 1 FOR UPDATE"), 'Team mutations do not revalidate the active actor membership.');
-$assert(str_contains($team, "UPDATE auth_sessions") && str_contains($team, "'membership_' . \$status") && str_contains($team, 'revocation_reason=:reason'), 'Membership suspension/removal does not revoke sessions safely.');
+$assert(str_contains($team, 'UPDATE auth_sessions') && str_contains($team, "'membership_' . \$status") && str_contains($team, 'revocation_reason=:reason'), 'Membership suspension/removal does not revoke sessions safely.');
 $assert(str_contains($query, '$canManageTeam') && str_contains($query, 'AND au.user_id=:current_user'), 'Non-manager team data is not isolated to the current user.');
 
 $assert(str_contains($revocation, "status='active'") && str_contains($revocation, 'LIMIT 1 FOR UPDATE'), 'Invitation revocation does not lock and revalidate the active actor membership.');
@@ -114,4 +119,5 @@ if ($failures !== []) {
     fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL);
     exit(1);
 }
+
 echo "Phase 17 account, team and security contract passed.\n";
