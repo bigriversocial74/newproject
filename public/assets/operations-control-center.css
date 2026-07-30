@@ -1,0 +1,181 @@
+.operations-hero {
+  align-items: center;
+  gap: 2rem;
+}
+
+.operations-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.operations-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d9e0e8);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+}
+
+.operations-row.compact {
+  padding: 0.8rem 0.9rem;
+}
+
+.operations-row-main {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.operations-row-main strong,
+.operations-row-main p,
+.operations-row-main small {
+  overflow-wrap: anywhere;
+}
+
+.operations-row-main p,
+.operations-row-main small {
+  margin: 0;
+  color: var(--muted, #64748b);
+}
+
+.operations-title-line,
+.operations-badges,
+.operations-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.operations-actions {
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.operations-dialog {
+  width: min(560px, calc(100vw - 2rem));
+  border: 0;
+  border-radius: 18px;
+  padding: 0;
+  box-shadow: 0 28px 80px rgb(15 23 42 / 28%);
+}
+
+.operations-dialog::backdrop {
+  background: rgb(15 23 42 / 48%);
+}
+
+.operations-dialog form {
+  display: grid;
+  gap: 0;
+}
+
+.operations-dialog header,
+.operations-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border, #d9e0e8);
+}
+
+.operations-dialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border, #d9e0e8);
+  border-bottom: 0;
+}
+
+.operations-dialog h3 {
+  margin: 0;
+}
+
+.operations-form {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.operations-form label {
+  display: grid;
+  gap: 0.45rem;
+  font-weight: 650;
+}
+
+.operations-form input,
+.operations-form select,
+.operations-form textarea {
+  width: 100%;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.operations-form textarea {
+  resize: vertical;
+}
+
+.operations-confirmation {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.button.danger {
+  border-color: #ef4444;
+  color: #b91c1c;
+  background: #fff;
+}
+
+.status-critical,
+.status-failed,
+.status-unhealthy {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.status-warning,
+.status-open,
+.status-queued,
+.status-paused {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.status-info,
+.status-running,
+.status-acknowledged {
+  color: #1e40af;
+  background: #dbeafe;
+}
+
+.status-healthy,
+.status-delivered,
+.status-resolved,
+.status-active {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.status-revoked,
+.status-canceled {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+@media (max-width: 760px) {
+  .operations-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .operations-actions,
+  .operations-badges {
+    justify-content: flex-start;
+  }
+}
