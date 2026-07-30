@@ -17,13 +17,35 @@ try {
     if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $requestId)) {
         $requestId = 'MFAREQ-' . strtoupper(bin2hex(random_bytes(10)));
     }
-    $user = $container['mfa']->completeChallenge(
-        (string) ($payload['challenge_token'] ?? ''),
-        (string) ($payload['code'] ?? ''),
-        $ip,
-        $userAgent,
-        $requestId
+    $challengeToken = trim((string) ($payload['challenge_token'] ?? ''));
+    $tokenHash = hash('sha256', $challengeToken);
+    $attempt = $container['database']->pdo()->prepare(
+        'UPDATE auth_mfa_challenges
+         SET attempt_count=attempt_count+1
+         WHERE token_hash=:hash AND consumed_at IS NULL AND expires_at>UTC_TIMESTAMP()
+           AND attempt_count<max_attempts'
     );
+    $attempt->execute(['hash' => $tokenHash]);
+    if ($attempt->rowCount() !== 1) {
+        throw new AuthPublicException('mfa_challenge_invalid', 'The MFA challenge is invalid, expired, or locked.', 401);
+    }
+
+    try {
+        $user = $container['mfa']->completeChallenge(
+            $challengeToken,
+            (string) ($payload['code'] ?? ''),
+            $ip,
+            $userAgent,
+            $requestId
+        );
+    } catch (AuthPublicException $exception) {
+        $container['database']->pdo()->prepare(
+            'UPDATE auth_mfa_challenges
+             SET consumed_at=CASE WHEN attempt_count>=max_attempts THEN UTC_TIMESTAMP() ELSE consumed_at END
+             WHERE token_hash=:hash AND consumed_at IS NULL'
+        )->execute(['hash' => $tokenHash]);
+        throw $exception;
+    }
 
     $existingToken = $container['session']->applicationToken();
     if ($existingToken !== '') {
