@@ -111,6 +111,7 @@ jobs:
           php tests/phase15_federated_settings_database_integration.php
           php tests/phase16_billing_control_center_database_integration.php
           php tests/phase17_account_team_security_database_integration.php
+          php tests/phase17_invitation_revocation_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-latest
@@ -157,3 +158,4 @@ jobs:
           php tests/phase15_federated_settings_database_integration.php
           php tests/phase16_billing_control_center_database_integration.php
           php tests/phase17_account_team_security_database_integration.php
+          php tests/phase17_invitation_revocation_database_integration.php
