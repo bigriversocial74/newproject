@@ -113,22 +113,8 @@ final class AuthService
                     'expires_at' => $now->modify('+' . max(60, (int) $this->config['verification_ttl_seconds']) . ' seconds')->format('Y-m-d H:i:s'),
                     'created_at' => $now->format('Y-m-d H:i:s'),
                 ]);
-                $this->audit->record(
-                    'auth.registration',
-                    'success',
-                    $userId,
-                    $accountId,
-                    'user',
-                    $userPublicId,
-                    [],
-                    $requestId
-                );
-
-                return [
-                    'account_id' => $accountId,
-                    'user_id' => $userId,
-                    'verification_token' => $verificationToken,
-                ];
+                $this->audit->record('auth.registration', 'success', $userId, $accountId, 'user', $userPublicId, [], $requestId);
+                return ['account_id' => $accountId, 'user_id' => $userId, 'verification_token' => $verificationToken];
             });
         } catch (PDOException $exception) {
             if ((string) $exception->getCode() === '23000') {
@@ -140,39 +126,22 @@ final class AuthService
 
         try {
             $this->sendVerificationEmail($email, $displayName, $verificationToken);
-            $this->audit->record(
-                'auth.verification.requested',
-                'success',
-                $result['user_id'],
-                $result['account_id'],
-                'user',
-                null,
-                ['delivered' => true],
-                $requestId
-            );
+            $this->audit->record('auth.verification.requested', 'success', $result['user_id'], $result['account_id'], 'user', null, ['delivered' => true], $requestId);
         } catch (Throwable) {
-            $this->audit->record(
-                'auth.verification.requested',
-                'failure',
-                $result['user_id'],
-                $result['account_id'],
-                'user',
-                null,
-                ['delivered' => false, 'reason' => 'mail_delivery_failed'],
-                $requestId
-            );
-            throw new AuthPublicException(
-                'verification_delivery_failed',
-                'The account was created, but the verification email could not be sent. Request a new verification email.',
-                503
-            );
+            $this->audit->record('auth.verification.requested', 'failure', $result['user_id'], $result['account_id'], 'user', null, ['delivered' => false, 'reason' => 'mail_delivery_failed'], $requestId);
+            throw new AuthPublicException('verification_delivery_failed', 'The account was created, but the verification email could not be sent. Request a new verification email.', 503);
         }
         return $result;
     }
 
     /** @return array{id:int,public_id:string,email:string,display_name:string}|null */
-    public function authenticate(string $email, string $password, string $ip = '', string $userAgent = ''): ?array
-    {
+    public function authenticate(
+        string $email,
+        string $password,
+        string $ip = '',
+        string $userAgent = '',
+        bool $deferCompletion = false
+    ): ?array {
         $email = strtolower(trim($email));
         $pdo = $this->database->pdo();
         $emailHash = hash('sha256', $email);
@@ -204,12 +173,7 @@ final class AuthService
         $pdo->prepare(
             'INSERT INTO auth_login_attempts (email_hash, ip_hash, succeeded, attempted_at)
              VALUES (:email_hash, :ip_hash, :succeeded, :attempted_at)'
-        )->execute([
-            'email_hash' => $emailHash,
-            'ip_hash' => $ipHash,
-            'succeeded' => $active ? 1 : 0,
-            'attempted_at' => $now->format('Y-m-d H:i:s'),
-        ]);
+        )->execute(['email_hash' => $emailHash, 'ip_hash' => $ipHash, 'succeeded' => $active ? 1 : 0, 'attempted_at' => $now->format('Y-m-d H:i:s')]);
 
         if ($passwordValid && (string) $user['status'] === 'pending_verification') {
             $this->audit->record('auth.login.failure', 'denied', (int) $user['id'], null, 'user', (string) $user['public_id'], ['reason' => 'email_unverified']);
@@ -227,16 +191,22 @@ final class AuthService
                     ->execute(['hash' => $rehash, 'updated_at' => $now->format('Y-m-d H:i:s'), 'id' => $user['id']]);
             }
         }
-        $pdo->prepare('UPDATE users SET last_login_at = :last_login_at, updated_at = :updated_at WHERE id = :id')
-            ->execute(['last_login_at' => $now->format('Y-m-d H:i:s'), 'updated_at' => $now->format('Y-m-d H:i:s'), 'id' => $user['id']]);
-        $this->audit->record('auth.login.success', 'success', (int) $user['id'], null, 'user', (string) $user['public_id']);
 
-        return [
-            'id' => (int) $user['id'],
-            'public_id' => (string) $user['public_id'],
-            'email' => (string) $user['email'],
-            'display_name' => (string) $user['display_name'],
-        ];
+        $result = ['id' => (int) $user['id'], 'public_id' => (string) $user['public_id'], 'email' => (string) $user['email'], 'display_name' => (string) $user['display_name']];
+        if (!$deferCompletion) {
+            $this->completeLogin($result['id'], $result['public_id']);
+        } else {
+            $this->audit->record('auth.login.password_verified', 'success', $result['id'], null, 'user', $result['public_id']);
+        }
+        return $result;
+    }
+
+    public function completeLogin(int $userId, string $userPublicId, ?string $requestId = null): void
+    {
+        $now = (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
+        $this->database->pdo()->prepare('UPDATE users SET last_login_at=:now,updated_at=:now WHERE id=:id AND status=\'active\'')
+            ->execute(['now' => $now, 'id' => $userId]);
+        $this->audit->record('auth.login.success', 'success', $userId, null, 'user', $userPublicId, [], $requestId);
     }
 
     private function sendVerificationEmail(string $email, string $displayName, string $token): void
