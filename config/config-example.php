@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 return [
     'app' => [
         'name' => 'VP3.me',
@@ -28,6 +27,11 @@ return [
         'login_attempt_window_seconds' => max(60, (int) (getenv('AUTH_LOGIN_ATTEMPT_WINDOW_SECONDS') ?: 900)),
         'session_inactivity_ttl_seconds' => max(300, (int) (getenv('AUTH_SESSION_INACTIVITY_TTL_SECONDS') ?: 1800)),
         'session_absolute_ttl_seconds' => max(600, (int) (getenv('AUTH_SESSION_ABSOLUTE_TTL_SECONDS') ?: 43200)),
+        'secret_encryption_key_base64' => getenv('AUTH_SECRET_ENCRYPTION_KEY_B64') ?: '',
+        'secret_encryption_key_id' => getenv('AUTH_SECRET_ENCRYPTION_KEY_ID') ?: 'auth-aes256gcm-v1',
+        'mfa_challenge_ttl_seconds' => max(60, (int) (getenv('AUTH_MFA_CHALLENGE_TTL_SECONDS') ?: 300)),
+        'mfa_recovery_code_count' => max(6, min(20, (int) (getenv('AUTH_MFA_RECOVERY_CODE_COUNT') ?: 10))),
+        'team_invitation_ttl_seconds' => max(3600, (int) (getenv('AUTH_TEAM_INVITATION_TTL_SECONDS') ?: 604800)),
     ],
     'mail' => [
         'driver' => strtolower((string) (getenv('MAIL_DRIVER') ?: 'null')),
@@ -68,10 +72,7 @@ return [
         'maximum_archive_files' => max(1, (int) (getenv('VP3_POD_MAX_ARCHIVE_FILES') ?: 20000)),
         'maximum_archive_bytes' => max(1048576, (int) (getenv('VP3_POD_MAX_ARCHIVE_BYTES') ?: 1073741824)),
         'strip_single_root' => filter_var(getenv('VP3_POD_STRIP_SINGLE_ROOT') ?: '1', FILTER_VALIDATE_BOOL),
-        'protected_configuration_paths' => array_values(array_filter(array_map(
-            'trim',
-            explode(',', getenv('VP3_PROTECTED_CONFIGURATION_PATHS') ?: 'database.password,app.key,customer')
-        ))),
+        'protected_configuration_paths' => array_values(array_filter(array_map('trim', explode(',', getenv('VP3_PROTECTED_CONFIGURATION_PATHS') ?: 'database.password,app.key,customer')))),
     ],
     'homeserver' => [
         'lease_signing_private_key_base64' => getenv('VP3_HOMESERVER_LEASE_PRIVATE_KEY_B64') ?: '',
@@ -124,9 +125,7 @@ return [
         'wildcard_dns_ready' => filter_var(getenv('VP3_WILDCARD_DNS_READY') ?: '0', FILTER_VALIDATE_BOOL),
         'wildcard_tls_ready' => filter_var(getenv('VP3_WILDCARD_TLS_READY') ?: '0', FILTER_VALIDATE_BOOL),
     ],
-    'queue' => [
-        'lease_seconds' => (int) (getenv('VP3_QUEUE_LEASE_SECONDS') ?: 900),
-    ],
+    'queue' => ['lease_seconds' => (int) (getenv('VP3_QUEUE_LEASE_SECONDS') ?: 900)],
     'operations' => [
         'notification_driver' => strtolower((string) (getenv('VP3_OPERATIONS_NOTIFICATION_DRIVER') ?: 'null')),
         'secret_encryption_key_base64' => getenv('OPERATIONS_SECRET_ENCRYPTION_KEY_B64') ?: '',
