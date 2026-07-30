@@ -2,7 +2,7 @@
   'use strict';
   const root = document.querySelector('[data-control-center][data-page="billing"]');
   if (!root) return;
-  const accountId = Number(root.dataset.accountId || 0);
+  const accountPublicId = String(root.dataset.accountPublicId || '');
   const csrfToken = String(root.dataset.csrfToken || '');
   const notice = document.getElementById('billing-notice');
   const portalButton = document.getElementById('open-billing-portal');
@@ -31,7 +31,7 @@
   const post = async (path, payload = {}) => {
     const response = await fetch(path, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ ...payload, account_id: accountId, csrf_token: csrfToken }),
+      body: JSON.stringify({ ...payload, account_public_id: accountPublicId, csrf_token: csrfToken }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body?.error?.message || 'Unable to complete the billing request.');

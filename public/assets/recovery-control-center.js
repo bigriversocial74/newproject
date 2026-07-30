@@ -3,7 +3,7 @@
 
   const root = document.querySelector('[data-control-center][data-page="recovery"]');
   if (!root) return;
-  const accountId = Number(root.dataset.accountId || 0);
+  const accountPublicId = String(root.dataset.accountPublicId || '');
   const csrfToken = String(root.dataset.csrfToken || '');
   const notice = document.getElementById('recovery-notice');
   const dialog = document.getElementById('recovery-dialog');
@@ -41,7 +41,7 @@
     const response = await fetch(path, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ ...payload, account_id: accountId, csrf_token: csrfToken }),
+      body: JSON.stringify({ ...payload, account_public_id: accountPublicId, csrf_token: csrfToken }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body?.error?.message || 'Unable to complete the recovery request.');

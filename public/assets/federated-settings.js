@@ -5,7 +5,7 @@
   const shell = document.querySelector('[data-control-center]');
   if (!root || !shell) return;
 
-  const accountId = Number(shell.dataset.accountId || 0);
+  const accountPublicId = Number(shell.dataset.accountPublicId || 0);
   const csrfToken = shell.dataset.csrfToken || '';
   const groups = document.getElementById('settings-groups');
   const summary = document.getElementById('settings-summary');
@@ -47,7 +47,7 @@
       cache: 'no-store',
       headers,
       body: JSON.stringify({
-        account_id: accountId,
+        account_public_id: accountPublicId,
         csrf_token: csrfToken,
         ...payload,
         ...(request ? { request_id: request } : {}),

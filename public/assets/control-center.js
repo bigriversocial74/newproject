@@ -5,7 +5,7 @@
   if (!root) return;
 
   const page = root.dataset.page || "dashboard";
-  const accountId = Number(root.dataset.accountId || 0);
+  const accountPublicId = String(root.dataset.accountPublicId || '');
   const csrfToken = root.dataset.csrfToken || "";
   const state = { snapshot: null, busy: false, notice: null, availabilityTimer: null };
 
@@ -44,7 +44,7 @@
       body.idempotency_key = body.idempotency_key || `vp3-ui-${token()}`;
       headers["Idempotency-Key"] = body.idempotency_key;
     }
-    body.account_id = accountId;
+    body.account_public_id = accountPublicId;
     body.csrf_token = csrfToken;
     const response = await fetch(path, {
       method: "POST", credentials: "same-origin", cache: "no-store", headers, body: JSON.stringify(body),
@@ -71,7 +71,7 @@
   const detail = (label, value) => `<div class="detail"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
   const withAccount = (path) => {
     const url = new URL(path, window.location.origin);
-    url.searchParams.set("account_id", String(accountId));
+    url.searchParams.set("account", accountPublicId);
     return `${url.pathname}${url.search}${url.hash}`;
   };
 

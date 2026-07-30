@@ -4,7 +4,7 @@
   const root = document.querySelector('[data-control-center][data-page="infrastructure"]');
   if (!root) return;
 
-  const accountId = Number(root.dataset.accountId || 0);
+  const accountPublicId = String(root.dataset.accountPublicId || '');
   const csrfToken = root.dataset.csrfToken || '';
   const notice = document.getElementById('infrastructure-notice');
   const metrics = document.getElementById('infrastructure-metrics');
@@ -46,7 +46,7 @@
         'X-Request-ID': payload.request_id || requestId(),
         ...(payload.idempotency_key ? { 'Idempotency-Key': payload.idempotency_key } : {})
       },
-      body: JSON.stringify({ account_id: accountId, csrf_token: csrfToken, ...payload })
+      body: JSON.stringify({ account_public_id: accountPublicId, csrf_token: csrfToken, ...payload })
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
