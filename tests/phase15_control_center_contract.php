@@ -24,6 +24,8 @@ $endpoint = $read('src/Http/ControlCenterEndpoint.php');
 $overview = $read('public/api/control-center/v1/overview.php');
 $domainAction = $read('public/api/control-center/v1/domain-action.php');
 $podAction = $read('public/api/control-center/v1/pod-action.php');
+$lifecycleAction = $read('src/Lifecycle/DomainPodLifecycleActionService.php');
+$rollbackAction = $read('src/Lifecycle/PodRollbackLifecycleService.php');
 $dashboard = $read('public/dashboard.php');
 $domains = $read('public/domains.php');
 $pods = $read('public/pods.php');
@@ -67,13 +69,18 @@ $assert(!str_contains($query, 'hosting_reference'), 'Unified read model exposes 
 $assert(!str_contains($query, 'database_reference'), 'Unified read model exposes a database provider reference.');
 $assert(!str_contains($query, 'configuration_hash'), 'Unified read model exposes protected POD configuration evidence.');
 
-$assert(str_contains($domainAction, "'register' => \$service->registerAndActivate"), 'Domain UI cannot register and activate the paired license bundle.');
-$assert(str_contains($domainAction, "'activate_reserved' => \$service->activateReservedDomain"), 'Domain UI cannot activate a reservation.');
-$assert(str_contains($domainAction, "'suspend' => \$service->suspendDomain"), 'Domain UI cannot perform non-destructive suspension.');
-$assert(str_contains($domainAction, "!== 'RELEASE'"), 'Domain release is not protected by an exact confirmation.');
-$assert(str_contains($podAction, "\$service->enqueue("), 'POD provisioning does not use the durable queue.');
-$assert(str_contains($podAction, "\$service->enqueueRollback("), 'POD rollback does not use the durable queue.');
-$assert(str_contains($podAction, "!== 'ROLLBACK'"), 'POD rollback is not protected by an exact confirmation.');
+$assert(str_contains($domainAction, "'register' => \$service->registerDomain")
+    && str_contains($lifecycleAction, 'registerAndActivate('), 'Domain UI cannot register and activate the paired license bundle.');
+$assert(str_contains($domainAction, "'activate_reserved' => \$service->activateReservedDomain")
+    && str_contains($lifecycleAction, 'activateReservedDomain('), 'Domain UI cannot activate a reservation.');
+$assert(str_contains($domainAction, "'suspend' => \$service->suspendDomain")
+    && str_contains($lifecycleAction, 'suspendDomain('), 'Domain UI cannot perform non-destructive suspension.');
+$assert(str_contains($lifecycleAction, "!== 'RELEASE'"), 'Domain release is not protected by an exact confirmation.');
+$assert(str_contains($podAction, "'provision' => \$service->provisionPod")
+    && str_contains($lifecycleAction, '$this->pods->enqueue('), 'POD provisioning does not use the durable queue.');
+$assert(str_contains($podAction, "'rollback' => \$rollback->enqueue")
+    && str_contains($rollbackAction, '$this->pods->enqueueRollback('), 'POD rollback does not use the durable queue.');
+$assert(str_contains($rollbackAction, "!== 'ROLLBACK'"), 'POD rollback is not protected by an exact confirmation.');
 $assert(!str_contains($podAction, 'processNext('), 'POD worker execution occurs inside the web request.');
 
 foreach ([$dashboard, $domains, $pods, $homeservers] as $pageFile) {
