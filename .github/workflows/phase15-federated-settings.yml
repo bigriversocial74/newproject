@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: feature/phase-15-federated-settings-shared-control-center
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -213,7 +213,7 @@ jobs:
           php tests/phase15_federated_settings_contract.php
       - name: Restore permanent workflow and commit product repair
         run: |
-          git show HEAD^:.github/workflows/phase15-federated-settings.yml > .github/workflows/phase15-federated-settings.yml
+          git show 2c68a15cc053971317211e24a178407fac3eb3f4:.github/workflows/phase15-federated-settings.yml > .github/workflows/phase15-federated-settings.yml
           git rm -f .github/workflows/phase15-atomic-idempotency.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
