@@ -14,6 +14,7 @@ final class AuthEndpoint
 {
     public static function requireMethod(string $method): void
     {
+        PublicResponseGuard::enable();
         if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== strtoupper($method)) {
             JsonResponse::send(['error' => ['code' => 'method_not_allowed', 'message' => $method . ' required.']], 405);
         }
