@@ -71,7 +71,7 @@ try {
     $assert(($query['account'] ?? null) === $owned['public_id'], 'Generated return URL lost the public account identity.');
     $assert(!array_key_exists('account_id', $query), 'Generated return URL exposed an internal account ID.');
     $assert(!str_contains($success, (string) $owned['id']), 'Generated return URL contains the numeric account ID.');
-    $assert($publicFailure(fn () => $resolver->resolve($userId, $other['public_id'], ['customer_owner']), 'account_access_denied'), 'Cross-account public identity was accepted.');
+    $assert($publicFailure(fn () => $resolver->resolve($userId, $other['public_id'], ['customer_owner']), 'account_membership_required'), 'Cross-account public identity was accepted.');
     $native = $pdo->getAttribute(PDO::ATTR_EMULATE_PREPARES);
     $assert($native === false || $native === 0, 'Phase 26 database proof did not use native PDO prepares.');
 } catch (Throwable $exception) {
