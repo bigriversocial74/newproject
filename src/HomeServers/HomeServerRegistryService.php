@@ -46,7 +46,7 @@ final class HomeServerRegistryService
                 ];
             }
             $target = $this->licensedTarget($pdo, $accountId, $licenseId);
-            $existing = $pdo->prepare('SELECT id,public_id FROM homeserver_devices WHERE license_id=:license OR device_fingerprint=:fingerprint LIMIT 1 FOR UPDATE');
+            $existing = $pdo->prepare('SELECT id,public_id FROM homeserver_devices WHERE (license_id=:license OR device_fingerprint=:fingerprint) AND status<>\'revoked\' LIMIT 1 FOR UPDATE');
             $existing->execute(['license' => $licenseId, 'fingerprint' => $fingerprint]);
             $device = $existing->fetch(PDO::FETCH_ASSOC);
             if (is_array($device)) {
