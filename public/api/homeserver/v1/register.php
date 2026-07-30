@@ -17,6 +17,8 @@ try {
         HomeServerEndpoint::requestId($payload),
         HomeServerEndpoint::idempotencyKey($payload)
     );
+    unset($result['device_id']);
+    $result['account_public_id'] = $account['account_public_id'];
     JsonResponse::send(['data' => $result], 201);
 } catch (Throwable $exception) {
     HomeServerEndpoint::sendException($exception);
