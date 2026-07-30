@@ -69,28 +69,46 @@ final class HomeServerEndpoint
         return $value;
     }
 
-    /** @return array{account_id:int,user:array<string,mixed>,session:array<string,mixed>} */
+    /** @return array{account_id:int,account_public_id:string,user:array<string,mixed>,session:array<string,mixed>} */
     public static function accountContext(array $container, array $payload): array
     {
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
-        $requestedAccountId = max(0, (int) ($payload['account_id'] ?? 0));
-        $sql = "SELECT account_id FROM account_users WHERE user_id=:user AND status='active'
-                AND role IN ('customer_owner','customer_admin')";
-        $parameters = ['user' => (int) $current['user']['id']];
-        if ($requestedAccountId > 0) {
-            $sql .= ' AND account_id=:account';
-            $parameters['account'] = $requestedAccountId;
+        if (array_key_exists('account_id', $payload)) {
+            throw new AuthPublicException(
+                'account_public_identity_required',
+                'Use the public VP3 account identity for HomeServer Control Center requests.',
+                400
+            );
         }
-        $sql .= ' ORDER BY account_id LIMIT 1';
+        $requestedPublicId = trim((string) ($payload['account_public_id'] ?? ''));
+        if ($requestedPublicId !== '' && !preg_match('/^[A-Za-z0-9._:-]{3,64}$/', $requestedPublicId)) {
+            throw new AuthPublicException('account_identity_invalid', 'The VP3 account identity is invalid.', 400);
+        }
+        $sql = "SELECT au.account_id,a.public_id
+                FROM account_users au
+                JOIN accounts a ON a.id=au.account_id
+                WHERE au.user_id=:user AND au.status='active' AND a.status='active'
+                  AND au.role IN ('customer_owner','customer_admin')";
+        $parameters = ['user' => (int) $current['user']['id']];
+        if ($requestedPublicId !== '') {
+            $sql .= ' AND a.public_id=:public';
+            $parameters['public'] = $requestedPublicId;
+        }
+        $sql .= ' ORDER BY au.account_id LIMIT 1';
         $membership = $container['database']->pdo()->prepare($sql);
         $membership->execute($parameters);
-        $accountId = (int) $membership->fetchColumn();
-        if ($accountId < 1) {
-            throw new RuntimeException('An active VP3 customer owner or administrator membership is required.');
+        $row = $membership->fetch();
+        if (!is_array($row) || (int) $row['account_id'] < 1) {
+            throw new AuthPublicException(
+                'account_membership_required',
+                'An active VP3 customer owner or administrator membership is required.',
+                403
+            );
         }
         return [
-            'account_id' => $accountId,
+            'account_id' => (int) $row['account_id'],
+            'account_public_id' => (string) $row['public_id'],
             'user' => $current['user'],
             'session' => $current['session'],
         ];
