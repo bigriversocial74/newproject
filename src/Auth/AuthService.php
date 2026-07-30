@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 namespace Vp3\Auth;
 
 use DateTimeImmutable;
@@ -204,8 +203,13 @@ final class AuthService
     public function completeLogin(int $userId, string $userPublicId, ?string $requestId = null): void
     {
         $now = (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
-        $this->database->pdo()->prepare('UPDATE users SET last_login_at=:now,updated_at=:now WHERE id=:id AND status=\'active\'')
-            ->execute(['now' => $now, 'id' => $userId]);
+        $this->database->pdo()->prepare(
+            'UPDATE users SET last_login_at=:last_login_at,updated_at=:updated_at WHERE id=:id AND status=\'active\''
+        )->execute([
+            'last_login_at' => $now,
+            'updated_at' => $now,
+            'id' => $userId,
+        ]);
         $this->audit->record('auth.login.success', 'success', $userId, null, 'user', $userPublicId, [], $requestId);
     }
 
