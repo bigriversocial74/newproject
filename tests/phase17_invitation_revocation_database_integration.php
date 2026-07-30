@@ -29,6 +29,7 @@ if ($dsn === '') {
     fwrite(STDERR, "VP3_TEST_DSN is required.\n");
     exit(1);
 }
+
 $database = new Database([
     'dsn' => $dsn,
     'username' => getenv('VP3_TEST_DB_USER') ?: 'root',
@@ -41,6 +42,7 @@ $database = new Database([
 ]);
 $pdo = $database->pdo();
 $failures = [];
+
 $assert = static function (bool $condition, string $message) use (&$failures): void {
     if (!$condition) {
         $failures[] = $message;
@@ -69,13 +71,14 @@ try {
         throw new RuntimeException('Unable to hash the test password.');
     }
 
-    $createAccount = static function (string $name) use ($pdo, $suffix, $now, &$accountIds): int {
+    $createAccount = static function (string $code, string $name) use ($pdo, $suffix, $now, &$accountIds): int {
+        $publicId = 'VP3-' . $suffix . '-' . strtoupper($code);
         $pdo->prepare(
             "INSERT INTO accounts (public_id,account_type,status,display_name,created_at,updated_at)
              VALUES (:public,'organization','active',:name,:created_at,:updated_at)"
         )->execute([
-            'public' => 'VP3-P17-REV-' . $suffix . '-' . strtoupper($name),
-            'name' => 'Phase 17 Revocation ' . ucfirst($name),
+            'public' => $publicId,
+            'name' => $name,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -83,26 +86,25 @@ try {
         $accountIds[] = $id;
         return $id;
     };
-    $createUser = static function (string $name) use ($pdo, $suffix, $now, $passwordHash, &$userIds): array {
-        $public = 'USR-P17-REV-' . $suffix . '-' . strtoupper($name);
-        $email = strtolower($name . '-' . $suffix . '@example.test');
+    $createUser = static function (string $code, string $email) use ($pdo, $suffix, $now, $passwordHash, &$userIds): array {
+        $publicId = 'USR-' . $suffix . '-' . strtoupper($code);
         $pdo->prepare(
             "INSERT INTO users
              (public_id,email,email_normalized,password_hash,display_name,status,email_verified_at,created_at,updated_at)
              VALUES (:public,:email,:normalized,:password_hash,:display_name,'active',:verified_at,:created_at,:updated_at)"
         )->execute([
-            'public' => $public,
+            'public' => $publicId,
             'email' => $email,
-            'normalized' => $email,
+            'normalized' => strtolower($email),
             'password_hash' => $passwordHash,
-            'display_name' => 'Phase 17 ' . ucfirst($name),
+            'display_name' => 'Phase 17 Owner',
             'verified_at' => $now,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
         $id = (int) $pdo->lastInsertId();
         $userIds[] = $id;
-        return ['id' => $id, 'public_id' => $public, 'email' => $email];
+        return ['id' => $id, 'public_id' => $publicId, 'email' => $email];
     };
     $addMembership = static function (int $accountId, int $userId, string $role) use ($pdo, $now): void {
         $pdo->prepare(
@@ -144,9 +146,9 @@ try {
         ]);
     };
 
-    $accountA = $createAccount('primary');
-    $accountB = $createAccount('isolated');
-    $owner = $createUser('owner');
+    $accountA = $createAccount('A', 'Phase 17 Revocation Primary');
+    $accountB = $createAccount('B', 'Phase 17 Revocation Isolated');
+    $owner = $createUser('O', 'owner-' . strtolower($suffix) . '@example.test');
     $addMembership($accountA, $owner['id'], 'customer_owner');
 
     $audit = new AuthAuditService($database);
@@ -171,6 +173,7 @@ try {
         is_array($successRow) && $successRow['status'] === 'revoked' && $successRow['revoked_at'] !== null,
         'An authorized owner did not revoke the pending invitation.'
     );
+
     $receipt = $pdo->prepare(
         "SELECT COUNT(*) FROM account_security_receipts
          WHERE account_id=:account AND actor_user_id=:actor AND action='team.invitation_revoked'
@@ -210,6 +213,7 @@ try {
     );
     $status->execute(['public' => $staleInvitation]);
     $assert($status->fetchColumn() === 'pending', 'A stale owner role changed the invitation state.');
+
     $deniedReceipt = $pdo->prepare(
         "SELECT COUNT(*) FROM account_security_receipts
          WHERE account_id=:account AND actor_user_id=:actor AND action='team.invitation_revoked'
@@ -297,6 +301,8 @@ try {
     );
     $status->execute(['public' => $expiredInvitation]);
     $assert($status->fetchColumn() === 'pending', 'Expired invitation persistence was mutated by revocation.');
+    $deniedReceipt->execute(['account' => $accountA, 'actor' => $owner['id'], 'request' => $expiredRequest]);
+    $assert((int) $deniedReceipt->fetchColumn() === 1, 'Expired-invitation denial evidence did not persist.');
 
     $badHashes = $pdo->query(
         "SELECT COUNT(*) FROM account_security_receipts
@@ -325,4 +331,5 @@ if ($failures !== []) {
     fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL);
     exit(1);
 }
+
 echo "Phase 17 invitation revocation authorization integration passed.\n";
