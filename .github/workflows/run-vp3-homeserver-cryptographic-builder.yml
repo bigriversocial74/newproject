@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/run-vp3-homeserver-cryptographic-builder.yml
+      - scripts/build-phase13-homeserver-contract-temp.py
 
 permissions:
   contents: write
@@ -21,12 +22,8 @@ jobs:
           php-version: '8.3'
           extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
           coverage: none
-      - name: Extract and execute product builder
-        run: |
-          sed -n "/cat > \/tmp\/build_contract.py <<'PY'/,/^          PY$/p" .github/workflows/build-vp3-homeserver-cryptographic-contract.yml \
-            | sed '1d;$d;s/^          //' > /tmp/build_contract.py
-          test -s /tmp/build_contract.py
-          python /tmp/build_contract.py
+      - name: Build product tree
+        run: python scripts/build-phase13-homeserver-contract-temp.py
       - name: Validate generated product tree
         run: |
           find src public tests config -name '*.php' -print0 | xargs -0 -n1 php -l
@@ -36,6 +33,7 @@ jobs:
         run: |
           rm .github/workflows/build-vp3-homeserver-cryptographic-contract.yml
           rm .github/workflows/run-vp3-homeserver-cryptographic-builder.yml
+          rm scripts/build-phase13-homeserver-contract-temp.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
