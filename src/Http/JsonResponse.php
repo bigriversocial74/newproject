@@ -10,6 +10,7 @@ final class JsonResponse
     public static function send(array $payload, int $status = 200): never
     {
         if (PublicResponseGuard::enabled()) {
+            $payload = PublicResponseGuard::sanitize($payload);
             PublicResponseGuard::assertSafe($payload);
         }
 
