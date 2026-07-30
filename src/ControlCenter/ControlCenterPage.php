@@ -21,6 +21,7 @@ final class ControlCenterPage
         );
         $nav = [
             'dashboard' => ['/dashboard.php', 'Dashboard'],
+            'billing' => ['/billing.php', 'Billing & Plans'],
             'domains' => ['/domains.php', 'Domains'],
             'pods' => ['/pods.php', 'PODs'],
             'homeservers' => ['/homeservers.php', 'HomeServers'],
