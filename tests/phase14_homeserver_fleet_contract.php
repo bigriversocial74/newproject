@@ -11,6 +11,7 @@ $read = static function (string $path) use ($root): string {
 };
 $service = $read('src/HomeServers/HomeServerFleetQueryService.php');
 $options = $read('src/HomeServers/HomeServerRegistrationOptionsService.php');
+$licenseResolver = $read('src/HomeServers/HomeServerLicenseIdentityResolver.php');
 $endpoint = $read('public/api/homeserver/v1/fleet.php');
 $optionsEndpoint = $read('public/api/homeserver/v1/registration-options.php');
 $page = $read('public/homeservers.php');
@@ -34,9 +35,11 @@ $assert(!str_contains($service, 'code_hash'), 'Fleet service exposes or queries 
 $assert(!str_contains($service, 'token_hash'), 'Fleet service exposes or queries an installer grant token hash.');
 $assert(!str_contains($service, "'device_fingerprint' =>"), 'Fleet response exposes the device fingerprint.');
 $assert(str_contains($service, "'event_count_24h'"), 'Fleet response does not bound operational event counts to the recent window.');
-$assert(str_contains($options, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
-$assert(str_contains($options, 'hs.id IS NULL'), 'Eligible-license query does not require an unoccupied license.');
-$assert(str_contains($options, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
+$assert(str_contains($options, 'HomeServerLicenseIdentityResolver'), 'Registration options bypass the shared public license resolver.');
+$assert(str_contains($licenseResolver, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
+$assert(str_contains($licenseResolver, 'hs.id IS NULL'), 'Eligible-license query does not require an unoccupied license.');
+$assert(str_contains($licenseResolver, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
+$assert(!str_contains($licenseResolver, "'license_id' =>"), 'Eligible-license output exposes an internal ID.');
 $assert(str_contains($pageContext, "'customer_owner', 'customer_admin'"), 'Fleet page context does not require owner/admin roles.');
 $assert(str_contains($pageShell, "header('Cache-Control: no-store')"), 'Shared fleet page shell does not disable response caching.');
 $assert(str_contains($pageShell, 'Content-Security-Policy'), 'Shared fleet page shell does not enforce a restrictive CSP.');
@@ -49,15 +52,18 @@ $assert(str_contains($client, '/api/homeserver/v1/replace.php'), 'Fleet client c
 $assert(str_contains($client, '/api/homeserver/v1/transfer-request.php'), 'Fleet client cannot request a transfer.');
 $assert(str_contains($transferClient, '/api/homeserver/v1/transfer-accept.php'), 'Fleet client cannot accept a transfer.');
 $assert(str_contains($client, 'oneTimeBundle'), 'Registration and replacement credentials are not one-time values.');
-$assert(str_contains($client, 'bundle.account_public_id'), 'Activation bundles are not bound to their issuing public account identity.');
-$assert(str_contains($transferClient, 'bundleAccountPublicId'), 'Transferred bundles are not bound to the destination public account identity.');
+$assert(str_contains($client, 'bundle.account_public_id') && str_contains($client, 'bundle.license_public_id'), 'Activation bundles are not bound to public account/license identities.');
+$assert(str_contains($transferClient, 'bundleAccountPublicId') && str_contains($transferClient, 'bundle.license_public_id'), 'Transferred bundles are not bound to public account/license identities.');
 $assert(str_contains($transferClient, 'Transferred HomeServer activation bundle'), 'Transfer credentials lack a one-time activation flow.');
-$assert(str_contains($registerEndpoint, "unset(\$result['device_id'])") && str_contains($registerEndpoint, "'account_public_id'"), 'Registration response exposes an internal device/account identity.');
-$assert(str_contains($acceptEndpoint, "unset(\$result['license_id'])") && str_contains($acceptEndpoint, "'account_public_id'"), 'Transfer acceptance response exposes internal identity.');
+$assert(str_contains($registerEndpoint, "unset(\$result['device_id'])") && str_contains($registerEndpoint, "'account_public_id'") && str_contains($registerEndpoint, "'license_public_id'"), 'Registration response exposes internal identity.');
+$assert(str_contains($acceptEndpoint, "unset(\$result['license_id'])") && str_contains($acceptEndpoint, "'account_public_id'") && str_contains($acceptEndpoint, "'license_public_id'"), 'Transfer acceptance response exposes internal identity.');
 $assert(str_contains($transferEndpoint, 'target_account_public_id') && !str_contains($transferEndpoint, "payload['target_account_id']"), 'Transfer target still uses a numeric account identity.');
-$assert(!str_contains($client, 'account_id') && !str_contains($transferClient, 'account_id'), 'Fleet browser code still carries numeric account identity fields.');
-$assert(!str_contains($client, 'localStorage') && !str_contains($client, 'sessionStorage'), 'Fleet client persists one-time activation data.');
-$assert(!str_contains($transferClient, 'localStorage') && !str_contains($transferClient, 'sessionStorage'), 'Transfer client persists one-time activation data.');
+foreach ([$client, $transferClient] as $browser) {
+    foreach (['account_id:', 'license_id:', 'target_license_id:', '.license_id', '.target_license_id'] as $forbidden) {
+        $assert(!str_contains($browser, $forbidden), 'Fleet browser code carries numeric identity pattern ' . $forbidden . '.');
+    }
+    $assert(!str_contains($browser, 'localStorage') && !str_contains($browser, 'sessionStorage'), 'Fleet browser persists one-time activation data.');
+}
 $assert(!str_contains($page, '$exception->getMessage()'), 'Fleet authentication page leaks internal exception messages.');
 
 if ($failures !== []) { fwrite(STDERR, implode("\n", $failures) . "\n"); exit(1); }

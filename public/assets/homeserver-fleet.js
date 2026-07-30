@@ -84,7 +84,7 @@
     document.querySelector("#fleet-notice").innerHTML = state.notice ? `<div class="notice ${escapeHtml(state.notice.kind)}">${escapeHtml(state.notice.message)}</div>` : "";
     const licenseSelect = document.querySelector("#register-license");
     if (licenseSelect) {
-      licenseSelect.innerHTML = `<option value="">Select eligible license</option>${state.options.map((option) => `<option value="${Number(option.license_id)}">${escapeHtml(option.hostname)} · ${escapeHtml(option.plan_name)} · ${escapeHtml(option.license_public_id)}</option>`).join("")}`;
+      licenseSelect.innerHTML = `<option value="">Select eligible license</option>${state.options.map((option) => `<option value="${escapeHtml(option.license_public_id)}">${escapeHtml(option.hostname)} · ${escapeHtml(option.plan_name)} · ${escapeHtml(option.license_public_id)}</option>`).join("")}`;
       licenseSelect.disabled = state.busy;
     }
     document.querySelectorAll("[data-action],#refresh-fleet,#register-form button[type=submit]").forEach((button) => { button.disabled = state.busy; });
@@ -99,6 +99,7 @@
     modal.hidden = false;
     modal.innerHTML = `<div class="modal-card"><h2>One-time HomeServer activation bundle</h2><p class="help">Copy these values into the HomeServer Control Center now. VP3 will not display the credential or enrollment code again.</p><div class="secret-grid">
       <div class="secret-row"><span>Account public ID</span><code>${escapeHtml(bundle.account_public_id || accountPublicId())}</code></div>
+      <div class="secret-row"><span>License public ID</span><code>${escapeHtml(bundle.license_public_id)}</code></div>
       <div class="secret-row"><span>Device public ID</span><code>${escapeHtml(bundle.device_public_id)}</code></div>
       <div class="secret-row"><span>Device credential</span><code>${escapeHtml(bundle.credential || "Unavailable on replay")}</code></div>
       <div class="secret-row"><span>Enrollment code</span><code>${escapeHtml(bundle.enrollment_code || "Unavailable on replay")}</code></div>
@@ -110,7 +111,7 @@
   async function copyBundle() {
     const bundle = state.oneTimeBundle;
     if (!bundle) return;
-    const text = JSON.stringify({ account_public_id: bundle.account_public_id || accountPublicId(), device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2);
+    const text = JSON.stringify({ account_public_id: bundle.account_public_id || accountPublicId(), license_public_id: bundle.license_public_id, device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2);
     await navigator.clipboard.writeText(text);
     state.notice = { kind: "success", message: "One-time activation bundle copied." };
     render();
@@ -134,9 +135,9 @@
 
   async function register(event) {
     event.preventDefault();
-    const licenseId = Number(document.querySelector("#register-license")?.value || 0);
+    const licensePublicId = String(document.querySelector("#register-license")?.value || "").trim();
     const fingerprint = document.querySelector("#register-fingerprint")?.value?.trim() || "";
-    if (!licenseId || !/^[a-f0-9]{64}$/i.test(fingerprint)) {
+    if (!licensePublicId || !/^[a-f0-9]{64}$/i.test(fingerprint)) {
       state.notice = { kind: "warning", message: "Select an eligible license and paste the 64-character HomeServer fingerprint." };
       render();
       return;
@@ -144,7 +145,7 @@
     state.busy = true;
     render();
     try {
-      state.oneTimeBundle = { ...(await api("/api/homeserver/v1/register.php", { license_id: licenseId, device_fingerprint: fingerprint, request_id: requestId(), idempotency_key: idempotencyKey() })), account_public_id: accountPublicId() };
+      state.oneTimeBundle = await api("/api/homeserver/v1/register.php", { license_public_id: licensePublicId, device_fingerprint: fingerprint, request_id: requestId(), idempotency_key: idempotencyKey() });
       document.querySelector("#register-form")?.reset();
       state.notice = { kind: "success", message: "HomeServer registered. Complete activation in Control Center using the one-time bundle." };
       await load(true);

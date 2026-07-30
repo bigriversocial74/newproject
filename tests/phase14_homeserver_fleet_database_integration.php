@@ -56,9 +56,17 @@ try {
         $pdo->prepare("INSERT INTO entitlement_bundles (public_id,account_id,subscription_id,domain_registration_id,plan_id,snapshot_hash,created_at,updated_at) VALUES (:public,:account,:subscription,:domain,:plan,:hash,:now,:now)")
             ->execute(['public' => 'BUNDLE-P14-' . strtoupper($token . '-' . $suffix), 'account' => $accountId, 'subscription' => $subscriptionId, 'domain' => $domainId, 'plan' => $planId, 'hash' => hash('sha256', $suffix . $token), 'now' => $now]);
         $bundleId = (int) $pdo->lastInsertId();
+        $licensePublicId = 'HSL-P14-' . strtoupper($token . '-' . $suffix);
         $pdo->prepare("INSERT INTO licenses (public_id,account_id,subscription_id,domain_registration_id,entitlement_bundle_id,product_type,status,starts_at,created_at,updated_at) VALUES (:public,:account,:subscription,:domain,:bundle,'homeserver','active',:now,:now,:now)")
-            ->execute(['public' => 'HSL-P14-' . strtoupper($token . '-' . $suffix), 'account' => $accountId, 'subscription' => $subscriptionId, 'domain' => $domainId, 'bundle' => $bundleId, 'now' => $now]);
-        return ['account' => $accountId, 'subscription' => $subscriptionId, 'domain' => $domainId, 'license' => (int) $pdo->lastInsertId(), 'hostname' => $label . '.vp3.me'];
+            ->execute(['public' => $licensePublicId, 'account' => $accountId, 'subscription' => $subscriptionId, 'domain' => $domainId, 'bundle' => $bundleId, 'now' => $now]);
+        return [
+            'account' => $accountId,
+            'subscription' => $subscriptionId,
+            'domain' => $domainId,
+            'license' => (int) $pdo->lastInsertId(),
+            'license_public_id' => $licensePublicId,
+            'hostname' => $label . '.vp3.me',
+        ];
     };
 
     $occupied = $createLicense('occupied');
@@ -84,10 +92,13 @@ try {
     $assert(!array_key_exists('device_fingerprint', $fleet['devices'][0]), 'Fleet exposed the device fingerprint.');
 
     $options = (new HomeServerRegistrationOptionsService($database))->eligibleLicenses($available['account']);
-    $optionIds = array_column($options, 'license_id');
-    $assert(in_array($available['license'], $optionIds, true), 'Unused eligible HomeServer license was omitted.');
-    $assert(!in_array($occupied['license'], $optionIds, true), 'Occupied HomeServer license was offered for registration.');
-    $assert(!in_array($other['license'], $optionIds, true), 'Cross-account HomeServer license was offered.');
+    $optionPublicIds = array_column($options, 'license_public_id');
+    $assert(in_array($available['license_public_id'], $optionPublicIds, true), 'Unused eligible HomeServer license was omitted.');
+    $assert(!in_array($occupied['license_public_id'], $optionPublicIds, true), 'Occupied HomeServer license was offered for registration.');
+    $assert(!in_array($other['license_public_id'], $optionPublicIds, true), 'Cross-account HomeServer license was offered.');
+    foreach ($options as $option) {
+        $assert(!array_key_exists('license_id', $option), 'Eligible license options expose an internal license ID.');
+    }
 
     $otherFleet = (new HomeServerFleetQueryService($database))->snapshot($other['account']);
     $assert($otherFleet['summary']['total'] === 0, 'Cross-account fleet isolation failed.');
