@@ -50,26 +50,40 @@ try {
         $pdo->prepare("INSERT INTO accounts (public_id,account_type,status,display_name,created_at,updated_at) VALUES (?,'organization','active',?,?,?)")
             ->execute([$accountPublic, 'Phase 24 ' . $suffix, $now, $now]);
         $accountId = (int) $pdo->lastInsertId();
+        $subscriptionPublic = "SUB24-{$token}-{$suffix}";
         $pdo->prepare("INSERT INTO subscriptions (public_id,account_id,plan_id,status,starts_at,current_period_starts_at,current_period_ends_at,created_at,updated_at) VALUES (?,?,?,'active',?,?,?,?,?)")
-            ->execute(["SUB24-{$token}-{$suffix}", $accountId, $planId, $now, $now, $ends, $now, $now]);
-        $subscriptionId = (int) $pdo->lastInsertId();
-        $label = strtolower("p24-{$token}-{$suffix}");
-        $pdo->prepare("INSERT INTO domain_registrations (public_id,account_id,subscription_id,label,hostname,status,routing_status,ssl_status,registered_at,created_at,updated_at) VALUES (?,?,?,?,?,'active','active','active',?,?,?)")
-            ->execute(["DOM24-{$token}-{$suffix}", $accountId, $subscriptionId, $label, $label . '.vp3.me', $now, $now, $now]);
-        $domainId = (int) $pdo->lastInsertId();
-        $pdo->prepare("INSERT INTO entitlement_bundles (public_id,account_id,subscription_id,domain_registration_id,plan_id,snapshot_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
-            ->execute(["BND24-{$token}-{$suffix}", $accountId, $subscriptionId, $domainId, $planId, hash('sha256', $token . $suffix), $now, $now]);
-        return ['account' => $accountId, 'subscription' => $subscriptionId, 'domain' => $domainId, 'bundle' => (int) $pdo->lastInsertId()];
+            ->execute([$subscriptionPublic, $accountId, $planId, $now, $now, $ends, $now, $now]);
+        return [
+            'account' => $accountId,
+            'account_public_id' => $accountPublic,
+            'subscription' => (int) $pdo->lastInsertId(),
+            'subscription_public_id' => $subscriptionPublic,
+        ];
     };
-    $createLicense = static function (array $account, string $suffix, string $product, string $status = 'active') use ($pdo, $token, $now): array {
+    $createLicense = static function (array $account, string $suffix, string $product, string $status = 'active') use ($pdo, $token, $now, $planId): array {
+        $label = strtolower("p24-{$token}-{$suffix}");
+        $domainPublic = "DOM24-{$token}-{$suffix}";
+        $pdo->prepare("INSERT INTO domain_registrations (public_id,account_id,subscription_id,label,hostname,status,routing_status,ssl_status,registered_at,created_at,updated_at) VALUES (?,?,?,?,?,'active','active','active',?,?,?)")
+            ->execute([$domainPublic, $account['account'], $account['subscription'], $label, $label . '.vp3.me', $now, $now, $now]);
+        $domainId = (int) $pdo->lastInsertId();
+        $bundlePublic = "BND24-{$token}-{$suffix}";
+        $pdo->prepare("INSERT INTO entitlement_bundles (public_id,account_id,subscription_id,domain_registration_id,plan_id,snapshot_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
+            ->execute([$bundlePublic, $account['account'], $account['subscription'], $domainId, $planId, hash('sha256', $token . $suffix), $now, $now]);
+        $bundleId = (int) $pdo->lastInsertId();
         $public = "LIC24-{$token}-{$suffix}";
         $pdo->prepare("INSERT INTO licenses (public_id,account_id,subscription_id,domain_registration_id,entitlement_bundle_id,product_type,status,starts_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-            ->execute([$public, $account['account'], $account['subscription'], $account['domain'], $account['bundle'], $product, $status, $now, $now, $now]);
-        return ['id' => (int) $pdo->lastInsertId(), 'public_id' => $public];
+            ->execute([$public, $account['account'], $account['subscription'], $domainId, $bundleId, $product, $status, $now, $now, $now]);
+        return [
+            'id' => (int) $pdo->lastInsertId(),
+            'public_id' => $public,
+            'domain' => $domainId,
+            'domain_public_id' => $domainPublic,
+            'hostname' => $label . '.vp3.me',
+        ];
     };
     $occupy = static function (array $account, array $license, string $suffix) use ($pdo, $token, $now): void {
         $pdo->prepare("INSERT INTO homeserver_devices (public_id,account_id,subscription_id,domain_registration_id,license_id,device_fingerprint,credential_hash,status,pairing_status,software_version,mcp_version,update_channel,frontend_limit,paired_frontend_count,last_heartbeat_at,paired_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'online','paired','24.0.0','1.0.0','stable',4,1,?,?,?,?)")
-            ->execute(["HS24-{$token}-{$suffix}", $account['account'], $account['subscription'], $account['domain'], $license['id'], hash('sha256', 'fingerprint-' . $token . $suffix), hash('sha256', 'credential-' . $token . $suffix), $now, $now, $now, $now]);
+            ->execute(["HS24-{$token}-{$suffix}", $account['account'], $account['subscription'], $license['domain'], $license['id'], hash('sha256', 'fingerprint-' . $token . $suffix), hash('sha256', 'credential-' . $token . $suffix), $now, $now, $now, $now]);
     };
 
     $primary = $createAccount('PRIMARY');
@@ -85,8 +99,10 @@ try {
     $options = $resolver->eligibleLicenses($primary['account']);
     $assert(count($options) === 1, 'Eligible license list did not exclude occupied, expired, or wrong-product licenses.');
     $assert(($options[0]['license_public_id'] ?? null) === $eligible['public_id'], 'Eligible license list returned the wrong public identity.');
+    $assert(($options[0]['domain_public_id'] ?? null) === $eligible['domain_public_id'], 'Eligible license list returned the wrong Domain public identity.');
+    $assert(($options[0]['subscription_public_id'] ?? null) === $primary['subscription_public_id'], 'Eligible license list returned the wrong subscription public identity.');
+    $assert(($options[0]['hostname'] ?? null) === $eligible['hostname'], 'Eligible license list returned the wrong hostname.');
     $assert(!array_key_exists('license_id', $options[0]), 'Eligible license list exposed an internal license ID.');
-    $assert(isset($options[0]['domain_public_id'], $options[0]['subscription_public_id'], $options[0]['hostname']), 'Eligible license list omitted customer-safe context.');
 
     $resolved = $resolver->resolveEligible($primary['account'], $eligible['public_id']);
     $assert($resolved === $eligible['id'], 'Public license identity resolved the wrong internal license.');
