@@ -100,7 +100,14 @@ final class FederatedSettingsService
         });
 
         $snapshot = $this->buildSnapshot($accountId, $device);
-        $this->recordReceipt($accountId, $deviceId, 'WEB-' . strtoupper(bin2hex(random_bytes(10))), 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
+        $requestId = 'WEB-' . strtoupper(bin2hex(random_bytes(10)));
+        $requestHash = hash('sha256', $this->canonicalJson([
+            'setting_key' => $settingKey,
+            'value' => $validated,
+            'expected_revision' => $expectedRevision,
+            'device_public_id' => $devicePublicId,
+        ]));
+        $this->recordReceipt($accountId, $deviceId, $requestId, $requestHash, 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
         return $snapshot;
     }
 
@@ -113,20 +120,39 @@ final class FederatedSettingsService
         array $updates
     ): array {
         $device = $this->authenticateDevice($devicePublicId, $credential);
+        if (count($updates) > 64) {
+            throw new RuntimeException('The settings sync contains too many updates.');
+        }
+        $seenKeys = [];
+        foreach ($updates as $update) {
+            if (!is_array($update)) {
+                throw new RuntimeException('The settings sync update list is invalid.');
+            }
+            $key = trim((string) ($update['setting_key'] ?? ''));
+            if (isset($seenKeys[$key])) {
+                throw new RuntimeException('The settings sync contains a duplicate setting key.');
+            }
+            $seenKeys[$key] = true;
+        }
+        $requestHash = hash('sha256', $this->canonicalJson([
+            'device_public_id' => $devicePublicId,
+            'base_revision' => max(0, $baseRevision),
+            'updates' => $updates,
+        ]));
         $replayed = $this->database->pdo()->prepare(
-            'SELECT result,conflict_count FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
+            'SELECT request_hash FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
         );
         $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
-        if ($replayed->fetch(PDO::FETCH_ASSOC)) {
+        $replayedReceipt = $replayed->fetch(PDO::FETCH_ASSOC);
+        if (is_array($replayedReceipt)) {
+            if (!hash_equals((string) $replayedReceipt['request_hash'], $requestHash)) {
+                throw new RuntimeException('The settings sync request ID was reused with a different payload.');
+            }
             $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
             $snapshot['replayed'] = true;
             $snapshot['applied'] = [];
             $snapshot['conflicts'] = [];
             return $snapshot;
-        }
-
-        if (count($updates) > 64) {
-            throw new RuntimeException('The settings sync contains too many updates.');
         }
         $applied = [];
         $conflicts = [];
@@ -199,6 +225,7 @@ final class FederatedSettingsService
             (int) $device['account_id'],
             (int) $device['id'],
             $requestId,
+            $requestHash,
             'device_push',
             $baseRevision,
             max((int) $snapshot['max_revision'], $maxApplied),
@@ -345,6 +372,7 @@ final class FederatedSettingsService
         int $accountId,
         ?int $deviceId,
         string $requestId,
+        string $requestHash,
         string $direction,
         int $baseRevision,
         int $appliedRevision,
@@ -353,12 +381,13 @@ final class FederatedSettingsService
         int $conflictCount
     ): void {
         $this->database->pdo()->prepare(
-            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
+            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,request_hash,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:request_hash,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
         )->execute([
             'public' => 'FSS-' . strtoupper(bin2hex(random_bytes(12))),
             'account' => $accountId,
             'device' => $deviceId,
             'request' => substr($requestId, 0, 64),
+            'request_hash' => strtolower($requestHash),
             'direction' => $direction,
             'base' => max(0, $baseRevision),
             'applied' => max(0, $appliedRevision),
