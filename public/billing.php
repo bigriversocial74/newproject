@@ -8,7 +8,10 @@ use Vp3\ControlCenter\ControlCenterPage;
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
-    $context = AccountPageContext::resolve($container);
+    $context = AccountPageContext::resolve(
+        $container,
+        ['customer_owner', 'customer_admin', 'billing_manager']
+    );
 } catch (AuthPublicException $exception) {
     ControlCenterPage::renderAccessFailure('VP3 Billing', $exception);
 }
