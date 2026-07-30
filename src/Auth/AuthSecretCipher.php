@@ -23,25 +23,11 @@ final class AuthSecretCipher
     {
         $nonce = random_bytes(12);
         $tag = '';
-        $ciphertext = openssl_encrypt(
-            $plaintext,
-            'aes-256-gcm',
-            $this->key(),
-            OPENSSL_RAW_DATA,
-            $nonce,
-            $tag,
-            $context,
-            16
-        );
+        $ciphertext = openssl_encrypt($plaintext, 'aes-256-gcm', $this->key(), OPENSSL_RAW_DATA, $nonce, $tag, $context, 16);
         if (!is_string($ciphertext) || strlen($tag) !== 16) {
             throw new RuntimeException('Authentication secret encryption failed.');
         }
-        return [
-            'ciphertext' => base64_encode($ciphertext),
-            'nonce' => base64_encode($nonce),
-            'tag' => base64_encode($tag),
-            'key_id' => $this->keyId,
-        ];
+        return ['ciphertext' => base64_encode($ciphertext), 'nonce' => base64_encode($nonce), 'tag' => base64_encode($tag), 'key_id' => $this->keyId];
     }
 
     public function decrypt(string $ciphertext, string $nonce, string $tag, string $context): string
@@ -52,15 +38,7 @@ final class AuthSecretCipher
         if (!is_string($ciphertextBytes) || !is_string($nonceBytes) || !is_string($tagBytes)) {
             throw new RuntimeException('Authentication secret encoding is invalid.');
         }
-        $plaintext = openssl_decrypt(
-            $ciphertextBytes,
-            'aes-256-gcm',
-            $this->key(),
-            OPENSSL_RAW_DATA,
-            $nonceBytes,
-            $tagBytes,
-            $context
-        );
+        $plaintext = openssl_decrypt($ciphertextBytes, 'aes-256-gcm', $this->key(), OPENSSL_RAW_DATA, $nonceBytes, $tagBytes, $context);
         if (!is_string($plaintext)) {
             throw new RuntimeException('Authentication secret verification failed.');
         }
@@ -69,7 +47,11 @@ final class AuthSecretCipher
 
     private function key(): string
     {
-        $key = base64_decode($this->keyBase64, true);
+        $encoded = trim($this->keyBase64);
+        if ($encoded === '' && strtolower((string) (getenv('APP_ENV') ?: 'development')) !== 'production') {
+            $encoded = base64_encode(hash('sha256', 'vp3-development-only-auth-secret-key', true));
+        }
+        $key = base64_decode($encoded, true);
         if (!is_string($key) || strlen($key) !== 32) {
             throw new RuntimeException('A valid 32-byte authentication secret encryption key is required.');
         }
