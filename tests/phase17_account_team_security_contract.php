@@ -76,7 +76,7 @@ $assert(str_contains($team, 'invited_email_normalized') && str_contains($team, '
 $assert(str_contains($team, "status='expired'") && str_contains($query, "THEN 'expired'"), 'Expired invitations are not represented explicitly.');
 $assert(str_contains($team, "return ['denied' => 'email_mismatch']") && str_contains($team, "team.invitation_accepted', 'denied'"), 'Invitation denial evidence is not committed before rejection.');
 $assert(str_contains($team, 'assertAnotherOwner') && str_contains($team, 'team_final_owner_required'), 'Final-owner protection is missing.');
-$assert(str_contains($team, "UPDATE auth_sessions SET revoked_at=UTC_TIMESTAMP()") && str_contains($team, "membership_{$status}"), 'Membership suspension/removal does not revoke sessions.');
+$assert(str_contains($team, "UPDATE auth_sessions SET revoked_at=UTC_TIMESTAMP()") && str_contains($team, 'membership_{$status}'), 'Membership suspension/removal does not revoke sessions.');
 $assert(str_contains($query, '$canManageTeam') && str_contains($query, 'AND au.user_id=:current_user'), 'Non-manager team data is not isolated to the current user.');
 
 $assert(str_contains($client, 'inviteButton.disabled = !snapshot.can_manage_team'), 'Invite button is not enabled from the authorized overview state.');
