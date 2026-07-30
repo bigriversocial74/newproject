@@ -1,222 +1,118 @@
 name: Phase 15 Federated Settings
 
 on:
-  pull_request:
   push:
     branches:
       - feature/phase-15-federated-settings-shared-control-center
+  pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: phase15-vp3-atomic-repair-${{ github.ref }}
-  cancel-in-progress: true
+  group: phase15-vp3-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
-  repair:
+  php:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: shivammathur/setup-php@v2
         with:
-          ref: feature/phase-15-federated-settings-shared-control-center
-          fetch-depth: 0
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, json, mbstring, openssl, sodium, zip
+          coverage: none
+      - name: Validate PHP and JavaScript syntax
+        run: |
+          find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
+          node --check public/assets/federated-settings.js
+      - name: Run retained and Phase 15 contracts
+        run: |
+          php tests/run.php
+          php tests/phase12_homeserver_control_plane_contract.php
+          php tests/phase13_homeserver_cutover_contract.php
+          php tests/phase14_homeserver_fleet_contract.php
+          php tests/phase15_federated_settings_contract.php
+
+  mysql8:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: vp3_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: pdo, pdo_mysql, json, mbstring
+          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
           coverage: none
-      - name: Make request claims atomic with mutations
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+      - name: Import cumulative installer twice
+        working-directory: database
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('src/Settings/FederatedSettingsService.php')
-          text = path.read_text()
-          start_marker = '    /** @param array<int,array<string,mixed>> $updates @return array<string,mixed> */\n    public function synchronizeDevice('
-          end_marker = '    /** @param array<string,mixed>|null $device @return array<string,mixed> */\n    private function buildSnapshot('
-          start = text.find(start_marker)
-          end = text.find(end_marker, start)
-          if start < 0 or end < 0:
-              raise SystemExit('synchronizeDevice method boundaries were not found')
-
-          method = '''    /** @param array<int,array<string,mixed>> $updates @return array<string,mixed> */
-    public function synchronizeDevice(
-        string $devicePublicId,
-        string $credential,
-        string $requestId,
-        int $baseRevision,
-        array $updates
-    ): array {
-        $device = $this->authenticateDevice($devicePublicId, $credential);
-        if (count($updates) > 64) {
-            throw new RuntimeException('The settings sync contains too many updates.');
-        }
-        $seenKeys = [];
-        foreach ($updates as $update) {
-            if (!is_array($update)) {
-                throw new RuntimeException('The settings sync update list is invalid.');
-            }
-            $key = trim((string) ($update['setting_key'] ?? ''));
-            if (isset($seenKeys[$key])) {
-                throw new RuntimeException('The settings sync contains a duplicate setting key.');
-            }
-            $seenKeys[$key] = true;
-        }
-        $requestHash = hash('sha256', $this->canonicalJson([
-            'device_public_id' => $devicePublicId,
-            'base_revision' => max(0, $baseRevision),
-            'updates' => $updates,
-        ]));
-
-        $outcome = $this->database->transaction(function (PDO $pdo) use ($device, $requestId, $requestHash, $baseRevision, $updates): array {
-            try {
-                $this->recordReceipt(
-                    (int) $device['account_id'],
-                    (int) $device['id'],
-                    $requestId,
-                    $requestHash,
-                    'device_push',
-                    $baseRevision,
-                    $baseRevision,
-                    str_repeat('0', 64),
-                    'replayed',
-                    0,
-                    $pdo
-                );
-            } catch (\\PDOException $exception) {
-                $existing = $pdo->prepare(
-                    'SELECT request_hash FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1 FOR UPDATE'
-                );
-                $existing->execute(['device' => $device['id'], 'request' => $requestId]);
-                $receipt = $existing->fetch(PDO::FETCH_ASSOC);
-                if (!is_array($receipt)) {
-                    throw $exception;
-                }
-                if (!hash_equals((string) $receipt['request_hash'], $requestHash)) {
-                    throw new RuntimeException('The settings sync request ID was reused with a different payload.');
-                }
-                return ['replayed' => true];
-            }
-
-            $applied = [];
-            $conflicts = [];
-            $maxApplied = $baseRevision;
-            foreach ($updates as $index => $update) {
-                $key = trim((string) ($update['setting_key'] ?? ''));
-                $expected = max(0, (int) ($update['expected_revision'] ?? 0));
-                $definition = $this->definition($key, $pdo);
-                if ($definition['authority'] === 'vp3') {
-                    $conflicts[] = ['setting_key' => $key, 'reason' => 'vp3_authority'];
-                    continue;
-                }
-                $value = $this->validateValue($definition, $update['value'] ?? null);
-                $scopeType = $definition['authority'] === 'homeserver' ? 'device' : 'account';
-                $scopeKey = $scopeType === 'device' ? (string) $device['public_id'] : 'account';
-                $deviceId = $scopeType === 'device' ? (int) $device['id'] : null;
-                $current = $pdo->prepare(
-                    'SELECT id,revision FROM federated_settings WHERE account_id=:account AND scope_type=:scope AND scope_key=:scope_key AND setting_key=:setting LIMIT 1 FOR UPDATE'
-                );
-                $current->execute([
-                    'account' => $device['account_id'],
-                    'scope' => $scopeType,
-                    'scope_key' => $scopeKey,
-                    'setting' => $key,
-                ]);
-                $row = $current->fetch(PDO::FETCH_ASSOC);
-                $currentRevision = is_array($row) ? (int) $row['revision'] : 0;
-                if ($currentRevision !== $expected) {
-                    $conflicts[] = ['setting_key' => $key, 'reason' => 'revision', 'current_revision' => $currentRevision];
-                    continue;
-                }
-                $next = $currentRevision + 1;
-                $json = $this->canonicalJson($value);
-                if (is_array($row)) {
-                    $pdo->prepare(
-                        "UPDATE federated_settings SET value_json=:value,value_hash=:hash,revision=:revision,source_authority='homeserver',updated_by_user_id=NULL,updated_at=UTC_TIMESTAMP() WHERE id=:id"
-                    )->execute([
-                        'value' => $json,
-                        'hash' => hash('sha256', $json),
-                        'revision' => $next,
-                        'id' => $row['id'],
-                    ]);
-                } else {
-                    $pdo->prepare(
-                        "INSERT INTO federated_settings (account_id,device_id,scope_type,scope_key,setting_key,value_json,value_hash,revision,source_authority,updated_by_user_id,created_at,updated_at) VALUES (:account,:device,:scope,:scope_key,:setting,:value,:hash,:revision,'homeserver',NULL,UTC_TIMESTAMP(),UTC_TIMESTAMP())"
-                    )->execute([
-                        'account' => $device['account_id'],
-                        'device' => $deviceId,
-                        'scope' => $scopeType,
-                        'scope_key' => $scopeKey,
-                        'setting' => $key,
-                        'value' => $json,
-                        'hash' => hash('sha256', $json),
-                        'revision' => $next,
-                    ]);
-                }
-                $maxApplied = max($maxApplied, $next);
-                $applied[] = ['setting_key' => $key, 'revision' => $next, 'index' => $index];
-            }
-
-            $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
-            $result = $conflicts === [] ? 'applied' : ($applied === [] ? 'conflict' : 'partial');
-            $finalize = $pdo->prepare(
-                'UPDATE federated_settings_sync_receipts SET applied_revision=:applied,snapshot_hash=:snapshot,result=:result,conflict_count=:conflicts WHERE device_id=:device AND request_id=:request AND request_hash=:request_hash'
-            );
-            $finalize->execute([
-                'applied' => max((int) $snapshot['max_revision'], $maxApplied),
-                'snapshot' => strtolower((string) $snapshot['snapshot_hash']),
-                'result' => $result,
-                'conflicts' => count($conflicts),
-                'device' => (int) $device['id'],
-                'request' => substr($requestId, 0, 64),
-                'request_hash' => strtolower($requestHash),
-            ]);
-            if ($finalize->rowCount() !== 1) {
-                throw new RuntimeException('Unable to finalize the settings sync request receipt.');
-            }
-            $snapshot['replayed'] = false;
-            $snapshot['applied'] = $applied;
-            $snapshot['conflicts'] = $conflicts;
-            return $snapshot;
-        });
-
-        if (($outcome['replayed'] ?? false) === true) {
-            $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
-            $snapshot['replayed'] = true;
-            $snapshot['applied'] = [];
-            $snapshot['conflicts'] = [];
-            return $snapshot;
-        }
-        return $outcome;
-    }
-
-'''
-          text = text[:start] + method + text[end:]
-
-          receipt_start = text.find('    private function recordReceipt(')
-          receipt_end = text.find('    private function canonicalJson(', receipt_start)
-          if receipt_start < 0 or receipt_end < 0:
-              raise SystemExit('recordReceipt method boundaries were not found')
-          receipt = text[receipt_start:receipt_end]
-          receipt = receipt.replace(
-              '        int $conflictCount\n    ): void {\n        $this->database->pdo()->prepare(',
-              '        int $conflictCount,\n        ?PDO $pdo = null\n    ): void {\n        $pdo ??= $this->database->pdo();\n        $pdo->prepare(',
-              1,
-          )
-          if '?PDO $pdo = null' not in receipt:
-              raise SystemExit('recordReceipt connection injection was not applied')
-          text = text[:receipt_start] + receipt + text[receipt_end:]
-          path.write_text(text)
-          PY
-          php -l src/Settings/FederatedSettingsService.php
-          php tests/phase15_federated_settings_contract.php
-      - name: Restore permanent workflow and commit product repair
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
+      - name: Run retained and Phase 15 database certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
         run: |
-          git show 2c68a15cc053971317211e24a178407fac3eb3f4:.github/workflows/phase15-federated-settings.yml > .github/workflows/phase15-federated-settings.yml
-          git rm -f .github/workflows/phase15-atomic-idempotency.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/phase15-federated-settings.yml src/Settings/FederatedSettingsService.php tests/phase15_federated_settings_contract.php tests/phase15_federated_settings_database_integration.php
-          git commit -m "Make federated settings request claims atomic"
-          git push origin HEAD:feature/phase-15-federated-settings-shared-control-center
+          php tests/phase12_homeserver_control_plane_database_integration.php
+          php tests/phase14_homeserver_fleet_database_integration.php
+          php tests/phase15_federated_settings_database_integration.php
+
+  mariadb1011:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: vp3_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
+          coverage: none
+      - name: Install MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+      - name: Import cumulative installer twice
+        working-directory: database
+        run: |
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
+      - name: Run retained and Phase 15 database certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/phase12_homeserver_control_plane_database_integration.php
+          php tests/phase14_homeserver_fleet_database_integration.php
+          php tests/phase15_federated_settings_database_integration.php
