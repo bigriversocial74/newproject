@@ -8,6 +8,7 @@ use JsonException;
 use RuntimeException;
 use Throwable;
 use Vp3\Auth\AuthPublicException;
+use Vp3\ControlCenter\PublicAccountIdentityResolver;
 
 final class HomeServerEndpoint
 {
@@ -81,34 +82,15 @@ final class HomeServerEndpoint
                 400
             );
         }
-        $requestedPublicId = trim((string) ($payload['account_public_id'] ?? ''));
-        if ($requestedPublicId !== '' && !preg_match('/^[A-Za-z0-9._:-]{3,64}$/', $requestedPublicId)) {
-            throw new AuthPublicException('account_identity_invalid', 'The VP3 account identity is invalid.', 400);
-        }
-        $sql = "SELECT au.account_id,a.public_id
-                FROM account_users au
-                JOIN accounts a ON a.id=au.account_id
-                WHERE au.user_id=:user AND au.status='active' AND a.status='active'
-                  AND au.role IN ('customer_owner','customer_admin')";
-        $parameters = ['user' => (int) $current['user']['id']];
-        if ($requestedPublicId !== '') {
-            $sql .= ' AND a.public_id=:public';
-            $parameters['public'] = $requestedPublicId;
-        }
-        $sql .= ' ORDER BY au.account_id LIMIT 1';
-        $membership = $container['database']->pdo()->prepare($sql);
-        $membership->execute($parameters);
-        $row = $membership->fetch();
-        if (!is_array($row) || (int) $row['account_id'] < 1) {
-            throw new AuthPublicException(
-                'account_membership_required',
-                'An active VP3 customer owner or administrator membership is required.',
-                403
-            );
-        }
+        $resolver = new PublicAccountIdentityResolver($container['database']);
+        $resolved = $resolver->resolve(
+            (int) $current['user']['id'],
+            isset($payload['account_public_id']) ? (string) $payload['account_public_id'] : null,
+            ['customer_owner', 'customer_admin']
+        );
         return [
-            'account_id' => (int) $row['account_id'],
-            'account_public_id' => (string) $row['public_id'],
+            'account_id' => $resolved['account_id'],
+            'account_public_id' => $resolved['account_public_id'],
             'user' => $current['user'],
             'session' => $current['session'],
         ];
