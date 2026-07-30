@@ -36,15 +36,19 @@
   }).format(Number(minor || 0) / 100);
   const token = () => crypto.randomUUID();
 
-  async function api(path, payload, mutation = false) {
-    const body = { account_id: accountId, csrf_token: csrfToken, ...payload };
+  async function api(path, payload = {}, options = {}) {
+    const body = { ...payload };
     const headers = { "Content-Type": "application/json", "X-CSRF-Token": csrfToken };
-    if (mutation) {
+    if (options.request) {
       body.request_id = body.request_id || `vp3-ui-${token()}`;
-      body.idempotency_key = body.idempotency_key || `vp3-ui-${token()}`;
       headers["X-Request-ID"] = body.request_id;
+    }
+    if (options.idempotency) {
+      body.idempotency_key = body.idempotency_key || `vp3-ui-${token()}`;
       headers["Idempotency-Key"] = body.idempotency_key;
     }
+    body.account_id = accountId;
+    body.csrf_token = csrfToken;
     const response = await fetch(path, {
       method: "POST", credentials: "same-origin", cache: "no-store", headers, body: JSON.stringify(body),
     });
@@ -65,8 +69,8 @@
     root.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
   }
 
-  function metric(label, value, detail = "") {
-    return `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</article>`;
+  function metric(label, value, detailText = "") {
+    return `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detailText ? `<small>${escapeHtml(detailText)}</small>` : ""}</article>`;
   }
 
   function status(value) {
@@ -177,16 +181,16 @@
   async function load() {
     setBusy(true);
     try {
-      state.snapshot = await api("/api/control-center/v1/overview.php", {});
+      state.snapshot = await api("/api/control-center/v1/overview.php");
       render();
     } catch (error) {
-      showNotice(error.message, "danger");
+      showNotice(error instanceof Error ? error.message : "Unable to load the VP3 account.", "danger");
     } finally {
       setBusy(false);
     }
   }
 
-  function modal(title, body, confirmLabel, confirmClass = "danger") {
+  function modal(title, body, confirmLabel, confirmClass = "danger", collect = () => true) {
     const host = document.querySelector("#control-center-modal");
     if (!host) return Promise.resolve(false);
     return new Promise((resolve) => {
@@ -194,7 +198,9 @@
       host.innerHTML = `<section class="modal-card"><h3>${escapeHtml(title)}</h3>${body}<div class="modal-actions"><button type="button" class="button ghost" data-modal-cancel>Cancel</button><button type="button" class="button ${escapeHtml(confirmClass)}" data-modal-confirm>${escapeHtml(confirmLabel)}</button></div></section>`;
       const close = (value) => { host.hidden = true; host.innerHTML = ""; resolve(value); };
       host.querySelector("[data-modal-cancel]").addEventListener("click", () => close(false));
-      host.querySelector("[data-modal-confirm]").addEventListener("click", () => close(true));
+      host.querySelector("[data-modal-confirm]").addEventListener("click", () => {
+        try { close(collect(host)); } catch (error) { showNotice(error instanceof Error ? error.message : "The confirmation is invalid.", "danger"); }
+      });
       host.addEventListener("click", (event) => { if (event.target === host) close(false); }, { once: true });
     });
   }
@@ -205,14 +211,18 @@
     const preview = document.querySelector("#domain-preview");
     const label = String(event.target.value || "").trim().toLowerCase();
     clearTimeout(state.availabilityTimer);
+    preview.className = "help";
     if (label.length < 3) { preview.textContent = "Enter at least three characters."; return; }
     preview.textContent = `Checking ${label}.vp3.me…`;
     state.availabilityTimer = setTimeout(async () => {
       try {
         const result = await api("/api/control-center/v1/domain-action.php", { action: "availability", label });
         preview.textContent = result.available ? `${result.hostname} is available.` : `${result.hostname} is already registered.`;
-        preview.className = `help ${result.available ? "" : "notice danger"}`;
-      } catch (error) { preview.textContent = error.message; }
+        preview.className = result.available ? "help" : "notice danger";
+      } catch (error) {
+        preview.className = "notice danger";
+        preview.textContent = error instanceof Error ? error.message : "Unable to check availability.";
+      }
     }, 320);
   });
 
@@ -222,11 +232,11 @@
     try {
       const result = await api("/api/control-center/v1/domain-action.php", {
         action: "register", subscription_id: Number(document.querySelector("#domain-subscription").value || 0), label: document.querySelector("#domain-label").value,
-      }, true);
+      }, { request: true, idempotency: true });
       showNotice(`${result.hostname} was registered with paired POD and HomeServer licenses.`);
       event.target.reset();
       await load();
-    } catch (error) { showNotice(error.message, "danger"); } finally { setBusy(false); }
+    } catch (error) { showNotice(error instanceof Error ? error.message : "Unable to register the Domain.", "danger"); } finally { setBusy(false); }
   });
 
   document.querySelector("#pod-provision-form")?.addEventListener("submit", async (event) => {
@@ -235,11 +245,11 @@
     try {
       const result = await api("/api/control-center/v1/pod-action.php", {
         action: "provision", domain_public_id: document.querySelector("#pod-domain").value,
-      }, true);
+      }, { request: true, idempotency: true });
       showNotice(`POD provisioning job ${result.job_public_id} was queued.`);
       event.target.reset();
       await load();
-    } catch (error) { showNotice(error.message, "danger"); } finally { setBusy(false); }
+    } catch (error) { showNotice(error instanceof Error ? error.message : "Unable to queue POD provisioning.", "danger"); } finally { setBusy(false); }
   });
 
   root.addEventListener("click", async (event) => {
@@ -253,9 +263,19 @@
       const domainPublicId = domainButton.dataset.domain;
       const payload = { action, domain_public_id: domainPublicId };
       if (action === "suspend") {
-        const ok = await modal("Suspend Domain", '<p class="subtle">Suspension is non-destructive but disables the Domain and paired entitlements until repaired.</p><label class="form"><span>Reason</span><textarea id="modal-reason" maxlength="500" placeholder="Operational or billing reason"></textarea></label>', "Suspend", "warning");
-        if (!ok) return;
-        payload.reason = document.querySelector("#modal-reason")?.value || "Suspended from VP3 Control Center";
+        const result = await modal(
+          "Suspend Domain",
+          '<p class="subtle">Suspension is non-destructive but disables the Domain and paired entitlements until repaired.</p><label class="form"><span>Reason</span><textarea id="modal-reason" maxlength="500" placeholder="Operational or billing reason"></textarea></label>',
+          "Suspend",
+          "warning",
+          (host) => {
+            const reason = String(host.querySelector("#modal-reason")?.value || "").trim();
+            if (!reason) throw new Error("A suspension reason is required.");
+            return { reason };
+          }
+        );
+        if (!result) return;
+        payload.reason = result.reason;
       }
       if (action === "release") {
         const ok = await modal("Release Domain", `<div class="notice danger">Release ${escapeHtml(domainButton.dataset.hostname)} and terminate its active Domain lifecycle. This action requires the exact server-side confirmation.</div>`, "Release Domain");
@@ -264,10 +284,10 @@
       }
       setBusy(true);
       try {
-        await api("/api/control-center/v1/domain-action.php", payload, true);
+        await api("/api/control-center/v1/domain-action.php", payload, { request: true, idempotency: true });
         showNotice(`Domain action ${humanize(action)} completed.`);
         await load();
-      } catch (error) { showNotice(error.message, "danger"); } finally { setBusy(false); }
+      } catch (error) { showNotice(error instanceof Error ? error.message : "Unable to complete the Domain action.", "danger"); } finally { setBusy(false); }
     }
 
     if (podButton) {
@@ -280,10 +300,10 @@
       }
       setBusy(true);
       try {
-        const result = await api("/api/control-center/v1/pod-action.php", payload, action === "rollback");
+        const result = await api("/api/control-center/v1/pod-action.php", payload, { request: true, idempotency: action === "rollback" });
         showNotice(action === "rollback" ? `Rollback job ${result.job_public_id} was queued.` : `POD job ${humanize(action)} completed.`);
         await load();
-      } catch (error) { showNotice(error.message, "danger"); } finally { setBusy(false); }
+      } catch (error) { showNotice(error instanceof Error ? error.message : "Unable to complete the POD action.", "danger"); } finally { setBusy(false); }
     }
   });
 
