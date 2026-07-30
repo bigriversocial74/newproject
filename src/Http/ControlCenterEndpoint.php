@@ -57,6 +57,7 @@ final class ControlCenterEndpoint
      */
     public static function accountContextForRoles(array $container, array $payload, array $allowedRoles): array
     {
+        PublicResponseGuard::enable();
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
         if (array_key_exists('account_id', $payload)) {

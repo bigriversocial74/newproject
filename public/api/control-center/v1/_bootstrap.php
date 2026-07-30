@@ -2,4 +2,9 @@
 
 declare(strict_types=1);
 
-return require dirname(__DIR__, 4) . '/bootstrap.php';
+use Vp3\Http\PublicResponseGuard;
+
+$container = require dirname(__DIR__, 4) . '/bootstrap.php';
+PublicResponseGuard::enable();
+
+return $container;
