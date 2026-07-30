@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Vp3\Http;
 
+use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
 use Throwable;
@@ -88,7 +89,7 @@ final class ControlCenterEndpoint
         if ($exception instanceof AuthPublicException) {
             AuthEndpoint::sendException($exception);
         }
-        if ($exception instanceof RuntimeException) {
+        if ($exception instanceof InvalidArgumentException || $exception instanceof RuntimeException) {
             $message = $exception->getMessage();
             $status = str_contains(strtolower($message), 'not found') ? 404 : 422;
             if (str_contains(strtolower($message), 'membership') || str_contains(strtolower($message), 'eligible')) {
