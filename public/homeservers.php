@@ -19,9 +19,10 @@ ControlCenterPage::renderStart(
     'Register, activate, monitor, replace, transfer, suspend, and revoke VP3 software-authority devices.'
 );
 $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$accountPublicId = (string) $context['selected']['public_id'];
 ?>
-<section data-homeserver-fleet data-account-id="<?= (int) $context['selected']['id'] ?>" data-csrf-token="<?= $escape($context['csrf_token']) ?>">
-  <section class="hero"><div><span class="eyebrow">VP3 software authority</span><h2>HomeServer Activation & Fleet Operations</h2><p>Register HomeServers to eligible VP3 licenses, complete secure Control Center activation, review signed leases and update evidence, and manage each device lifecycle.</p></div><div class="hero-actions"><a class="button light" href="/settings.php?account_id=<?= (int) $context['selected']['id'] ?>">Shared Settings</a><button id="refresh-fleet" class="button light" type="button">Refresh Fleet</button></div></section>
+<section data-homeserver-fleet data-account-public-id="<?= $escape($accountPublicId) ?>" data-csrf-token="<?= $escape($context['csrf_token']) ?>">
+  <section class="hero"><div><span class="eyebrow">VP3 software authority</span><h2>HomeServer Activation & Fleet Operations</h2><p>Register HomeServers to eligible VP3 licenses, complete secure Control Center activation, review signed leases and update evidence, and manage each device lifecycle.</p></div><div class="hero-actions"><a class="button light" href="/settings.php?account=<?= rawurlencode($accountPublicId) ?>">Shared Settings</a><button id="refresh-fleet" class="button light" type="button">Refresh Fleet</button></div></section>
   <section id="fleet-metrics" class="metrics" aria-label="Fleet summary"></section>
   <div id="fleet-notice" aria-live="polite"></div>
   <section class="grid two">
