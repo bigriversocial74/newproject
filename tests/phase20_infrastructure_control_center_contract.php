@@ -25,10 +25,13 @@ $required = [
     'public/assets/infrastructure-control-center.css',
     'src/Infrastructure/InfrastructureControlCenterQueryService.php',
     'src/Infrastructure/InfrastructureControlCenterActionService.php',
+    'src/Infrastructure/InfrastructureControlCenterQueueService.php',
     'tests/phase20_infrastructure_control_center_database_integration.php',
     'tests/phase20_infrastructure_stale_role_database_integration.php',
+    'tests/phase20_infrastructure_operation_serialization_database_integration.php',
     '.github/workflows/phase20-infrastructure-control-center.yml',
     '.github/workflows/phase20-infrastructure-stale-role.yml',
+    '.github/workflows/phase20-infrastructure-serialization.yml',
 ];
 foreach ($required as $path) {
     $assert(is_file($root . '/' . $path), 'Missing Phase 20 file: ' . $path);
@@ -39,6 +42,7 @@ $overview = $read('public/api/control-center/v1/infrastructure-overview.php');
 $action = $read('public/api/control-center/v1/infrastructure-action.php');
 $query = $read('src/Infrastructure/InfrastructureControlCenterQueryService.php');
 $actions = $read('src/Infrastructure/InfrastructureControlCenterActionService.php');
+$queue = $read('src/Infrastructure/InfrastructureControlCenterQueueService.php');
 $nav = $read('src/ControlCenter/ControlCenterPage.php');
 $js = $read('public/assets/infrastructure-control-center.js');
 
@@ -46,15 +50,22 @@ $assert(str_contains($page, "['customer_owner', 'customer_admin']"), 'Infrastruc
 $assert(str_contains($overview, 'accountContextForRoles'), 'Infrastructure overview does not enforce role-aware account context.');
 $assert(str_contains($action, 'ControlCenterEndpoint::requestId'), 'Infrastructure mutations do not require bounded request IDs.');
 $assert(str_contains($action, 'ControlCenterEndpoint::idempotencyKey'), 'Infrastructure queue mutations do not require idempotency keys.');
+$assert(str_contains($action, 'InfrastructureControlCenterQueueService'), 'Binding operations bypass the serialized queue service.');
 $assert(str_contains($actions, 'LIMIT 1 FOR UPDATE'), 'Infrastructure actions do not lock membership and resource state.');
 $assert(str_contains($actions, 'hash_equals($storedRole, $role)'), 'Infrastructure actions trust a stale caller role.');
-$assert(str_contains($actions, "\$confirmation !== 'TEARDOWN'"), 'Infrastructure teardown lacks exact confirmation.');
-$assert(str_contains($actions, 'provider_operation_steps'), 'Infrastructure queueing does not create durable operation stages.');
+$assert(str_contains($queue, 'LIMIT 1 FOR UPDATE'), 'Serialized infrastructure queue does not lock membership and binding state.');
+$assert(str_contains($queue, "status NOT IN ('completed','canceled')"), 'Serialized queue does not reject an existing open binding operation.');
+$assert(str_contains($queue, 'infrastructure_operation_open'), 'Serialized queue lacks a stable open-operation conflict code.');
+$assert(str_contains($queue, "\$confirmation !== 'TEARDOWN'"), 'Infrastructure teardown lacks exact confirmation.');
+$assert(str_contains($queue, 'provider_operation_steps'), 'Infrastructure queueing does not create durable operation stages.');
 $assert(str_contains($actions, 'credentials_ciphertext'), 'Provider credentials are not encrypted into the production schema.');
 $assert(str_contains($actions, 'infrastructure_permission_denied'), 'Denied infrastructure actions do not use a stable public code.');
 $staleRole = $read('tests/phase20_infrastructure_stale_role_database_integration.php');
 $assert(str_contains($staleRole, "'customer_admin'"), 'Phase 20 lacks an executable stale-role mismatch proof.');
 $assert(str_contains($staleRole, 'provider_receipts'), 'Stale-role denial evidence is not checked in provider receipts.');
+$serialization = $read('tests/phase20_infrastructure_operation_serialization_database_integration.php');
+$assert(str_contains($serialization, 'infrastructure_operation_open'), 'Phase 20 lacks executable open-operation conflict proof.');
+$assert(str_contains($serialization, 'openCount'), 'Phase 20 does not prove only one binding operation remains open.');
 $assert(str_contains($nav, "'infrastructure' => ['/infrastructure.php', 'Infrastructure']"), 'Control Center navigation omits Infrastructure.');
 $assert(str_contains($js, "credentials: 'same-origin'"), 'Infrastructure browser API calls are not same-origin credentialed.');
 $assert(!str_contains($js, 'localStorage') && !str_contains($js, 'sessionStorage'), 'Infrastructure UI persists sensitive state in browser storage.');
