@@ -9,7 +9,7 @@ $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
     $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
     $memberships = $container['database']->pdo()->prepare(
-        "SELECT a.id,a.public_id,a.display_name,au.role FROM account_users au JOIN accounts a ON a.id=au.account_id WHERE au.user_id=:user AND au.status='active' AND au.role IN ('owner','administrator') AND a.status='active' ORDER BY a.display_name,a.id"
+        "SELECT a.id,a.public_id,a.display_name,au.role FROM account_users au JOIN accounts a ON a.id=au.account_id WHERE au.user_id=:user AND au.status='active' AND au.role IN ('customer_owner','customer_admin') AND a.status='active' ORDER BY a.display_name,a.id"
     );
     $memberships->execute(['user' => (int) $current['user']['id']]);
     $accounts = $memberships->fetchAll(PDO::FETCH_ASSOC);
@@ -32,7 +32,7 @@ try {
     http_response_code(401);
     header('Content-Type: text/html; charset=utf-8');
     header('Cache-Control: no-store');
-    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VP3 Settings</title><style>body{font-family:system-ui;margin:0;background:#f5f6f8;color:#171b24;display:grid;place-items:center;min-height:100vh}.card{max-width:560px;background:#fff;border:1px solid #e2e6ec;border-radius:16px;padding:28px}p{color:#687286;line-height:1.55}</style></head><body><main class="card"><h1>Sign in required</h1><p>Sign in to an active VP3 owner or administrator account to manage shared settings.</p></main></body></html><?php
+    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VP3 Settings</title><style>body{font-family:system-ui;margin:0;background:#f5f6f8;color:#171b24;display:grid;place-items:center;min-height:100vh}.card{max-width:560px;background:#fff;border:1px solid #e2e6ec;border-radius:16px;padding:28px}p{color:#687286;line-height:1.55}</style></head><body><main class="card"><h1>Sign in required</h1><p>Sign in to an active VP3 customer owner or administrator account to manage shared settings.</p></main></body></html><?php
     exit;
 }
 
