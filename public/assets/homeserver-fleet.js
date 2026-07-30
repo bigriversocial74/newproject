@@ -5,7 +5,7 @@
   if (!root) return;
 
   const csrfToken = root.dataset.csrfToken || "";
-  const accountSelect = document.querySelector("#fleet-account");
+  const accountSelect = document.querySelector("#control-center-account");
   const state = { fleet: null, options: [], busy: false, notice: null, oneTimeBundle: null };
 
   const escapeHtml = (value) => String(value ?? "")
@@ -26,11 +26,13 @@
   };
 
   async function api(path, payload = {}) {
+    const body = { ...payload, account_id: accountId(), csrf_token: csrfToken };
     const response = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
+      cache: "no-store",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-      body: JSON.stringify({ account_id: accountId(), csrf_token: csrfToken, ...payload }),
+      body: JSON.stringify(body),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.message || `VP3 request failed with HTTP ${response.status}`);
@@ -40,12 +42,8 @@
   function renderMetrics() {
     const summary = state.fleet?.summary || {};
     const values = [
-      ["Total", summary.total || 0],
-      ["Active", summary.active || 0],
-      ["Online", summary.online || 0],
-      ["Attention", summary.attention || 0],
-      ["Pending", summary.pending_pairing || 0],
-      ["Suspended", summary.suspended || 0],
+      ["Total", summary.total || 0], ["Active", summary.active || 0], ["Online", summary.online || 0],
+      ["Attention", summary.attention || 0], ["Pending", summary.pending_pairing || 0], ["Suspended", summary.suspended || 0],
     ];
     return values.map(([label, value]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${Number(value)}</strong></article>`).join("");
   }
@@ -69,11 +67,11 @@
         <div><span>MCP</span><strong>${escapeHtml(device.mcp_version || "Not reported")}</strong></div>
       </div>
       <div class="device-actions">
-        ${canSuspend ? `<button class="button ghost" data-action="suspend" type="button">Suspend</button>` : ""}
-        ${canResume ? `<button class="button ghost" data-action="resume" type="button">Resume</button>` : ""}
-        ${canReplace ? `<button class="button ghost" data-action="replace" type="button">Replace Device</button>` : ""}
-        ${device.status !== "revoked" ? `<button class="button danger" data-action="revoke" type="button">Revoke</button>` : ""}
-        ${device.status !== "revoked" ? `<button class="button ghost" data-action="transfer" type="button">Transfer</button>` : ""}
+        ${canSuspend ? '<button class="button ghost" data-action="suspend" type="button">Suspend</button>' : ""}
+        ${canResume ? '<button class="button ghost" data-action="resume" type="button">Resume</button>' : ""}
+        ${canReplace ? '<button class="button ghost" data-action="replace" type="button">Replace Device</button>' : ""}
+        ${device.status !== "revoked" ? '<button class="button danger" data-action="revoke" type="button">Revoke</button>' : ""}
+        ${device.status !== "revoked" ? '<button class="button ghost" data-action="transfer" type="button">Transfer</button>' : ""}
       </div>
     </article>`;
   }
@@ -82,7 +80,7 @@
     document.querySelector("#fleet-metrics").innerHTML = renderMetrics();
     const list = document.querySelector("#fleet-devices");
     const devices = state.fleet?.devices || [];
-    list.innerHTML = devices.length ? devices.map(deviceCard).join("") : `<div class="empty">No HomeServers are registered to this account yet.</div>`;
+    list.innerHTML = devices.length ? devices.map(deviceCard).join("") : '<div class="empty">No HomeServers are registered to this account yet.</div>';
     document.querySelector("#fleet-notice").innerHTML = state.notice ? `<div class="notice ${escapeHtml(state.notice.kind)}">${escapeHtml(state.notice.message)}</div>` : "";
     const licenseSelect = document.querySelector("#register-license");
     if (licenseSelect) {
@@ -123,14 +121,11 @@
     if (!preserveNotice) state.notice = null;
     render();
     try {
-      const [fleet, options] = await Promise.all([
-        api("/api/homeserver/v1/fleet.php"),
-        api("/api/homeserver/v1/registration-options.php"),
-      ]);
+      const [fleet, options] = await Promise.all([api("/api/homeserver/v1/fleet.php"), api("/api/homeserver/v1/registration-options.php")]);
       state.fleet = fleet;
       state.options = Array.isArray(options?.licenses) ? options.licenses : [];
     } catch (error) {
-      state.notice = { kind: "warning", message: String(error) };
+      state.notice = { kind: "warning", message: error instanceof Error ? error.message : "Unable to load the HomeServer fleet." };
     } finally {
       state.busy = false;
       render();
@@ -154,7 +149,7 @@
       state.notice = { kind: "success", message: "HomeServer registered. Complete activation in Control Center using the one-time bundle." };
       await load(true);
     } catch (error) {
-      state.notice = { kind: "warning", message: String(error) };
+      state.notice = { kind: "warning", message: error instanceof Error ? error.message : "Unable to register the HomeServer." };
     } finally {
       state.busy = false;
       render();
@@ -171,8 +166,8 @@
     render();
     try {
       if (action === "suspend" || action === "resume") {
-        const confirmation = window.prompt(`Type ${action === "suspend" ? "SUSPEND" : "RESUME"} to continue:`);
-        if (confirmation !== (action === "suspend" ? "SUSPEND" : "RESUME")) return;
+        const phrase = action === "suspend" ? "SUSPEND" : "RESUME";
+        if (window.prompt(`Type ${phrase} to continue:`) !== phrase) return;
         await api("/api/homeserver/v1/suspend.php", { device_public_id: devicePublicId, suspended: action === "suspend", request_id: requestId() });
         state.notice = { kind: "success", message: `HomeServer ${action === "suspend" ? "suspended" : "resumed"}.` };
       } else if (action === "revoke") {
@@ -193,7 +188,7 @@
       }
       await load(true);
     } catch (error) {
-      state.notice = { kind: "warning", message: String(error) };
+      state.notice = { kind: "warning", message: error instanceof Error ? error.message : "Unable to complete the HomeServer action." };
     } finally {
       state.busy = false;
       render();
@@ -206,6 +201,6 @@
 
   document.querySelector("#register-form")?.addEventListener("submit", register);
   document.querySelector("#refresh-fleet")?.addEventListener("click", () => load());
-  accountSelect?.addEventListener("change", () => { state.oneTimeBundle = null; state.notice = null; load(); });
+  accountSelect?.addEventListener("change", () => { state.oneTimeBundle = null; state.notice = null; });
   load();
 })();
