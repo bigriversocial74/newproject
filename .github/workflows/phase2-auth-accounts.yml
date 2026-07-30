@@ -25,129 +25,28 @@ jobs:
       - name: Bind request IDs to canonical payloads
         run: |
           python - <<'PY'
+          import base64
           from pathlib import Path
+
+          replacements = [
+              ('ICAgICAgICAkc25hcHNob3QgPSAkdGhpcy0+YnVpbGRTbmFwc2hvdCgkYWNjb3VudElkLCAkZGV2aWNlKTsKICAgICAgICAkdGhpcy0+cmVjb3JkUmVjZWlwdCgkYWNjb3VudElkLCAkZGV2aWNlSWQsICdXRUItJyAuIHN0cnRvdXBwZXIoYmluMmhleChyYW5kb21fYnl0ZXMoMTApKSksICd2cDNfdXBkYXRlJywgJGV4cGVjdGVkUmV2aXNpb24sICRyZXZpc2lvbiwgKHN0cmluZykgJHNuYXBzaG90WydzbmFwc2hvdF9oYXNoJ10sICdhcHBsaWVkJywgMCk7CiAgICAgICAgcmV0dXJuICRzbmFwc2hvdDsK', 'ICAgICAgICAkc25hcHNob3QgPSAkdGhpcy0+YnVpbGRTbmFwc2hvdCgkYWNjb3VudElkLCAkZGV2aWNlKTsKICAgICAgICAkcmVxdWVzdElkID0gJ1dFQi0nIC4gc3RydG91cHBlcihiaW4yaGV4KHJhbmRvbV9ieXRlcygxMCkpKTsKICAgICAgICAkcmVxdWVzdEhhc2ggPSBoYXNoKCdzaGEyNTYnLCAkdGhpcy0+Y2Fub25pY2FsSnNvbihbCiAgICAgICAgICAgICdzZXR0aW5nX2tleScgPT4gJHNldHRpbmdLZXksCiAgICAgICAgICAgICd2YWx1ZScgPT4gJHZhbGlkYXRlZCwKICAgICAgICAgICAgJ2V4cGVjdGVkX3JldmlzaW9uJyA9PiAkZXhwZWN0ZWRSZXZpc2lvbiwKICAgICAgICAgICAgJ2RldmljZV9wdWJsaWNfaWQnID0+ICRkZXZpY2VQdWJsaWNJZCwKICAgICAgICBdKSk7CiAgICAgICAgJHRoaXMtPnJlY29yZFJlY2VpcHQoJGFjY291bnRJZCwgJGRldmljZUlkLCAkcmVxdWVzdElkLCAkcmVxdWVzdEhhc2gsICd2cDNfdXBkYXRlJywgJGV4cGVjdGVkUmV2aXNpb24sICRyZXZpc2lvbiwgKHN0cmluZykgJHNuYXBzaG90WydzbmFwc2hvdF9oYXNoJ10sICdhcHBsaWVkJywgMCk7CiAgICAgICAgcmV0dXJuICRzbmFwc2hvdDsK'),
+              ('ICAgICAgICAkZGV2aWNlID0gJHRoaXMtPmF1dGhlbnRpY2F0ZURldmljZSgkZGV2aWNlUHVibGljSWQsICRjcmVkZW50aWFsKTsKICAgICAgICAkcmVwbGF5ZWQgPSAkdGhpcy0+ZGF0YWJhc2UtPnBkbygpLT5wcmVwYXJlKAogICAgICAgICAgICAnU0VMRUNUIHJlc3VsdCxjb25mbGljdF9jb3VudCBGUk9NIGZlZGVyYXRlZF9zZXR0aW5nc19zeW5jX3JlY2VpcHRzIFdIRVJFIGRldmljZV9pZD06ZGV2aWNlIEFORCByZXF1ZXN0X2lkPTpyZXF1ZXN0IExJTUlUIDEnCiAgICAgICAgKTsKICAgICAgICAkcmVwbGF5ZWQtPmV4ZWN1dGUoWydkZXZpY2UnID0+ICRkZXZpY2VbJ2lkJ10sICdyZXF1ZXN0JyA9PiAkcmVxdWVzdElkXSk7CiAgICAgICAgaWYgKCRyZXBsYXllZC0+ZmV0Y2goUERPOjpGRVRDSF9BU1NPQykpIHsKICAgICAgICAgICAgJHNuYXBzaG90ID0gJHRoaXMtPmJ1aWxkU25hcHNob3QoKGludCkgJGRldmljZVsnYWNjb3VudF9pZCddLCAkZGV2aWNlKTsKICAgICAgICAgICAgJHNuYXBzaG90WydyZXBsYXllZCddID0gdHJ1ZTsKICAgICAgICAgICAgJHNuYXBzaG90WydhcHBsaWVkJ10gPSBbXTsKICAgICAgICAgICAgJHNuYXBzaG90Wydjb25mbGljdHMnXSA9IFtdOwogICAgICAgICAgICByZXR1cm4gJHNuYXBzaG90OwogICAgICAgIH0KCiAgICAgICAgaWYgKGNvdW50KCR1cGRhdGVzKSA+IDY0KSB7CiAgICAgICAgICAgIHRocm93IG5ldyBSdW50aW1lRXhjZXB0aW9uKCdUaGUgc2V0dGluZ3Mgc3luYyBjb250YWlucyB0b28gbWFueSB1cGRhdGVzLicpOwogICAgICAgIH0K', 'ICAgICAgICAkZGV2aWNlID0gJHRoaXMtPmF1dGhlbnRpY2F0ZURldmljZSgkZGV2aWNlUHVibGljSWQsICRjcmVkZW50aWFsKTsKICAgICAgICBpZiAoY291bnQoJHVwZGF0ZXMpID4gNjQpIHsKICAgICAgICAgICAgdGhyb3cgbmV3IFJ1bnRpbWVFeGNlcHRpb24oJ1RoZSBzZXR0aW5ncyBzeW5jIGNvbnRhaW5zIHRvbyBtYW55IHVwZGF0ZXMuJyk7CiAgICAgICAgfQogICAgICAgICRzZWVuS2V5cyA9IFtdOwogICAgICAgIGZvcmVhY2ggKCR1cGRhdGVzIGFzICR1cGRhdGUpIHsKICAgICAgICAgICAgaWYgKCFpc19hcnJheSgkdXBkYXRlKSkgewogICAgICAgICAgICAgICAgdGhyb3cgbmV3IFJ1bnRpbWVFeGNlcHRpb24oJ1RoZSBzZXR0aW5ncyBzeW5jIHVwZGF0ZSBsaXN0IGlzIGludmFsaWQuJyk7CiAgICAgICAgICAgIH0KICAgICAgICAgICAgJGtleSA9IHRyaW0oKHN0cmluZykgKCR1cGRhdGVbJ3NldHRpbmdfa2V5J10gPz8gJycpKTsKICAgICAgICAgICAgaWYgKGlzc2V0KCRzZWVuS2V5c1ska2V5XSkpIHsKICAgICAgICAgICAgICAgIHRocm93IG5ldyBSdW50aW1lRXhjZXB0aW9uKCdUaGUgc2V0dGluZ3Mgc3luYyBjb250YWlucyBhIGR1cGxpY2F0ZSBzZXR0aW5nIGtleS4nKTsKICAgICAgICAgICAgfQogICAgICAgICAgICAkc2VlbktleXNbJGtleV0gPSB0cnVlOwogICAgICAgIH0KICAgICAgICAkcmVxdWVzdEhhc2ggPSBoYXNoKCdzaGEyNTYnLCAkdGhpcy0+Y2Fub25pY2FsSnNvbihbCiAgICAgICAgICAgICdkZXZpY2VfcHVibGljX2lkJyA9PiAkZGV2aWNlUHVibGljSWQsCiAgICAgICAgICAgICdiYXNlX3JldmlzaW9uJyA9PiBtYXgoMCwgJGJhc2VSZXZpc2lvbiksCiAgICAgICAgICAgICd1cGRhdGVzJyA9PiAkdXBkYXRlcywKICAgICAgICBdKSk7CiAgICAgICAgJHJlcGxheWVkID0gJHRoaXMtPmRhdGFiYXNlLT5wZG8oKS0+cHJlcGFyZSgKICAgICAgICAgICAgJ1NFTEVDVCByZXF1ZXN0X2hhc2ggRlJPTSBmZWRlcmF0ZWRfc2V0dGluZ3Nfc3luY19yZWNlaXB0cyBXSEVSRSBkZXZpY2VfaWQ9OmRldmljZSBBTkQgcmVxdWVzdF9pZD06cmVxdWVzdCBMSU1JVCAxJwogICAgICAgICk7CiAgICAgICAgJHJlcGxheWVkLT5leGVjdXRlKFsnZGV2aWNlJyA9PiAkZGV2aWNlWydpZCddLCAncmVxdWVzdCcgPT4gJHJlcXVlc3RJZF0pOwogICAgICAgICRyZXBsYXllZFJlY2VpcHQgPSAkcmVwbGF5ZWQtPmZldGNoKFBETzo6RkVUQ0hfQVNTT0MpOwogICAgICAgIGlmIChpc19hcnJheSgkcmVwbGF5ZWRSZWNlaXB0KSkgewogICAgICAgICAgICBpZiAoIWhhc2hfZXF1YWxzKChzdHJpbmcpICRyZXBsYXllZFJlY2VpcHRbJ3JlcXVlc3RfaGFzaCddLCAkcmVxdWVzdEhhc2gpKSB7CiAgICAgICAgICAgICAgICB0aHJvdyBuZXcgUnVudGltZUV4Y2VwdGlvbignVGhlIHNldHRpbmdzIHN5bmMgcmVxdWVzdCBJRCB3YXMgcmV1c2VkIHdpdGggYSBkaWZmZXJlbnQgcGF5bG9hZC4nKTsKICAgICAgICAgICAgfQogICAgICAgICAgICAkc25hcHNob3QgPSAkdGhpcy0+YnVpbGRTbmFwc2hvdCgoaW50KSAkZGV2aWNlWydhY2NvdW50X2lkJ10sICRkZXZpY2UpOwogICAgICAgICAgICAkc25hcHNob3RbJ3JlcGxheWVkJ10gPSB0cnVlOwogICAgICAgICAgICAkc25hcHNob3RbJ2FwcGxpZWQnXSA9IFtdOwogICAgICAgICAgICAkc25hcHNob3RbJ2NvbmZsaWN0cyddID0gW107CiAgICAgICAgICAgIHJldHVybiAkc25hcHNob3Q7CiAgICAgICAgfQo='),
+              ('ICAgICAgICAgICAgJHJlcXVlc3RJZCwKICAgICAgICAgICAgJ2RldmljZV9wdXNoJywK', 'ICAgICAgICAgICAgJHJlcXVlc3RJZCwKICAgICAgICAgICAgJHJlcXVlc3RIYXNoLAogICAgICAgICAgICAnZGV2aWNlX3B1c2gnLAo='),
+              ('ICAgICAgICBzdHJpbmcgJHJlcXVlc3RJZCwKICAgICAgICBzdHJpbmcgJGRpcmVjdGlvbiwK', 'ICAgICAgICBzdHJpbmcgJHJlcXVlc3RJZCwKICAgICAgICBzdHJpbmcgJHJlcXVlc3RIYXNoLAogICAgICAgIHN0cmluZyAkZGlyZWN0aW9uLAo='),
+              ('ICAgICAgICAgICAgJ0lOU0VSVCBJTlRPIGZlZGVyYXRlZF9zZXR0aW5nc19zeW5jX3JlY2VpcHRzIChwdWJsaWNfaWQsYWNjb3VudF9pZCxkZXZpY2VfaWQscmVxdWVzdF9pZCxkaXJlY3Rpb24sYmFzZV9yZXZpc2lvbixhcHBsaWVkX3JldmlzaW9uLHNuYXBzaG90X2hhc2gscmVzdWx0LGNvbmZsaWN0X2NvdW50LGNyZWF0ZWRfYXQpIFZBTFVFUyAoOnB1YmxpYyw6YWNjb3VudCw6ZGV2aWNlLDpyZXF1ZXN0LDpkaXJlY3Rpb24sOmJhc2UsOmFwcGxpZWQsOnNuYXBzaG90LDpyZXN1bHQsOmNvbmZsaWN0cyxVVENfVElNRVNUQU1QKCkpJwo=', 'ICAgICAgICAgICAgJ0lOU0VSVCBJTlRPIGZlZGVyYXRlZF9zZXR0aW5nc19zeW5jX3JlY2VpcHRzIChwdWJsaWNfaWQsYWNjb3VudF9pZCxkZXZpY2VfaWQscmVxdWVzdF9pZCxyZXF1ZXN0X2hhc2gsZGlyZWN0aW9uLGJhc2VfcmV2aXNpb24sYXBwbGllZF9yZXZpc2lvbixzbmFwc2hvdF9oYXNoLHJlc3VsdCxjb25mbGljdF9jb3VudCxjcmVhdGVkX2F0KSBWQUxVRVMgKDpwdWJsaWMsOmFjY291bnQsOmRldmljZSw6cmVxdWVzdCw6cmVxdWVzdF9oYXNoLDpkaXJlY3Rpb24sOmJhc2UsOmFwcGxpZWQsOnNuYXBzaG90LDpyZXN1bHQsOmNvbmZsaWN0cyxVVENfVElNRVNUQU1QKCkpJwo='),
+              ('ICAgICAgICAgICAgJ3JlcXVlc3QnID0+IHN1YnN0cigkcmVxdWVzdElkLCAwLCA2NCksCiAgICAgICAgICAgICdkaXJlY3Rpb24nID0+ICRkaXJlY3Rpb24sCg==', 'ICAgICAgICAgICAgJ3JlcXVlc3QnID0+IHN1YnN0cigkcmVxdWVzdElkLCAwLCA2NCksCiAgICAgICAgICAgICdyZXF1ZXN0X2hhc2gnID0+IHN0cnRvbG93ZXIoJHJlcXVlc3RIYXNoKSwKICAgICAgICAgICAgJ2RpcmVjdGlvbicgPT4gJGRpcmVjdGlvbiwK'),
+          ]
 
           path = Path('src/Settings/FederatedSettingsService.php')
           text = path.read_text()
-
-          old = """        $snapshot = $this->buildSnapshot($accountId, $device);
-          $this->recordReceipt($accountId, $deviceId, 'WEB-' . strtoupper(bin2hex(random_bytes(10))), 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
-          return $snapshot;
-          """
-          new = """        $snapshot = $this->buildSnapshot($accountId, $device);
-          $requestId = 'WEB-' . strtoupper(bin2hex(random_bytes(10)));
-          $requestHash = hash('sha256', $this->canonicalJson([
-              'setting_key' => $settingKey,
-              'value' => $validated,
-              'expected_revision' => $expectedRevision,
-              'device_public_id' => $devicePublicId,
-          ]));
-          $this->recordReceipt($accountId, $deviceId, $requestId, $requestHash, 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
-          return $snapshot;
-          """
-          if old not in text:
-              raise SystemExit('browser receipt anchor not found')
-          text = text.replace(old, new, 1)
-
-          old = """        $device = $this->authenticateDevice($devicePublicId, $credential);
-          $replayed = $this->database->pdo()->prepare(
-              'SELECT result,conflict_count FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
-          );
-          $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
-          if ($replayed->fetch(PDO::FETCH_ASSOC)) {
-              $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
-              $snapshot['replayed'] = true;
-              $snapshot['applied'] = [];
-              $snapshot['conflicts'] = [];
-              return $snapshot;
-          }
-
-          if (count($updates) > 64) {
-              throw new RuntimeException('The settings sync contains too many updates.');
-          }
-          """
-          new = """        $device = $this->authenticateDevice($devicePublicId, $credential);
-          if (count($updates) > 64) {
-              throw new RuntimeException('The settings sync contains too many updates.');
-          }
-          $seenKeys = [];
-          foreach ($updates as $update) {
-              if (!is_array($update)) {
-                  throw new RuntimeException('The settings sync update list is invalid.');
-              }
-              $key = trim((string) ($update['setting_key'] ?? ''));
-              if (isset($seenKeys[$key])) {
-                  throw new RuntimeException('The settings sync contains a duplicate setting key.');
-              }
-              $seenKeys[$key] = true;
-          }
-          $requestHash = hash('sha256', $this->canonicalJson([
-              'device_public_id' => $devicePublicId,
-              'base_revision' => max(0, $baseRevision),
-              'updates' => $updates,
-          ]));
-          $replayed = $this->database->pdo()->prepare(
-              'SELECT request_hash FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
-          );
-          $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
-          $replayedReceipt = $replayed->fetch(PDO::FETCH_ASSOC);
-          if (is_array($replayedReceipt)) {
-              if (!hash_equals((string) $replayedReceipt['request_hash'], $requestHash)) {
-                  throw new RuntimeException('The settings sync request ID was reused with a different payload.');
-              }
-              $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
-              $snapshot['replayed'] = true;
-              $snapshot['applied'] = [];
-              $snapshot['conflicts'] = [];
-              return $snapshot;
-          }
-          """
-          if old not in text:
-              raise SystemExit('device replay anchor not found')
-          text = text.replace(old, new, 1)
-
-          old = """            $requestId,
-              'device_push',
-          """
-          new = """            $requestId,
-              $requestHash,
-              'device_push',
-          """
-          if old not in text:
-              raise SystemExit('device receipt call anchor not found')
-          text = text.replace(old, new, 1)
-
-          old = """        string $requestId,
-          string $direction,
-          """
-          new = """        string $requestId,
-          string $requestHash,
-          string $direction,
-          """
-          if old not in text:
-              raise SystemExit('receipt signature anchor not found')
-          text = text.replace(old, new, 1)
-
-          old = """            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
-          """
-          new = """            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,request_hash,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:request_hash,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
-          """
-          if old not in text:
-              raise SystemExit('receipt insert anchor not found')
-          text = text.replace(old, new, 1)
-
-          old = """            'request' => substr($requestId, 0, 64),
-              'direction' => $direction,
-          """
-          new = """            'request' => substr($requestId, 0, 64),
-              'request_hash' => strtolower($requestHash),
-              'direction' => $direction,
-          """
-          if old not in text:
-              raise SystemExit('receipt parameters anchor not found')
-          text = text.replace(old, new, 1)
-
-          path.write_text(text)
+          if 'request ID was reused with a different payload' not in text:
+              for index, (old_encoded, new_encoded) in enumerate(replacements, start=1):
+                  old = base64.b64decode(old_encoded).decode()
+                  new = base64.b64decode(new_encoded).decode()
+                  if old not in text:
+                      raise SystemExit(f'idempotency replacement {index} anchor not found')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
           PY
           php -l src/Settings/FederatedSettingsService.php
       - name: Restore permanent workflow and commit hardening
