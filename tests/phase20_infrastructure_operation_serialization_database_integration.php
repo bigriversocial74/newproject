@@ -124,6 +124,14 @@ try {
         'account' => $accountId,
         'binding' => $binding['id'],
     ]);
+    $pdo->prepare(
+        "UPDATE infrastructure_bindings
+         SET status='active',disabled_at=NULL,activated_at=COALESCE(activated_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP()
+         WHERE id=:binding AND account_id=:account"
+    )->execute([
+        'binding' => $binding['id'],
+        'account' => $accountId,
+    ]);
 
     $queued = $service->enqueue(
         $accountId,
