@@ -37,7 +37,9 @@ $assert($rejects(fn () => ControlCenterUrl::relative('//evil.example/path.php', 
 $assert($rejects(fn () => ControlCenterUrl::relative('/billing.php', '1')), 'Malformed public account identity was accepted.');
 $assert($rejects(fn () => ControlCenterUrl::relative('/billing.php', 'ACC-26.PUBLIC', ['account_id' => 42])), 'Numeric account override was accepted.');
 $assert($rejects(fn () => ControlCenterUrl::relative('/billing.php', 'ACC-26.PUBLIC', ['account' => 'OTHER'])), 'Public account override was accepted.');
+$assert($rejects(fn () => ControlCenterUrl::relative('/billing.php', 'ACC-26.PUBLIC', ['state' => ['nested']])), 'Non-scalar query value was accepted.');
 $assert($rejects(fn () => ControlCenterUrl::absolute('http://vp3.example.test', '/billing.php', 'ACC-26.PUBLIC')), 'Non-HTTPS base URL was accepted.');
+$assert($rejects(fn () => ControlCenterUrl::absolute('https://user@vp3.example.test', '/billing.php', 'ACC-26.PUBLIC')), 'Username-bearing base URL was accepted.');
 $assert($rejects(fn () => ControlCenterUrl::absolute('https://user:pass@vp3.example.test', '/billing.php', 'ACC-26.PUBLIC')), 'Credential-bearing base URL was accepted.');
 
 $billingAction = (string) file_get_contents($root . '/public/api/control-center/v1/billing-action.php');
