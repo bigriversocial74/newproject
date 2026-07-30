@@ -20,7 +20,7 @@ try {
     $memberships->execute(['user' => (int) $current['user']['id']]);
     $accounts = $memberships->fetchAll(PDO::FETCH_ASSOC);
     if ($accounts === []) {
-        throw new RuntimeException('An active VP3 account owner or administrator membership is required.');
+        throw new RuntimeException('Account membership is unavailable.');
     }
     $selectedAccountId = max(0, (int) ($_GET['account_id'] ?? 0));
     $selected = null;
@@ -34,11 +34,11 @@ try {
         $selected = $accounts[0];
     }
     $csrfToken = $container['session']->csrfToken();
-} catch (Throwable $exception) {
+} catch (Throwable) {
     http_response_code(401);
     header('Content-Type: text/html; charset=utf-8');
     header('Cache-Control: no-store');
-    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VP3 HomeServers</title><style>body{font-family:system-ui;margin:0;background:#f5f6f8;color:#171b24;display:grid;place-items:center;min-height:100vh}.card{max-width:560px;background:#fff;border:1px solid #e2e6ec;border-radius:16px;padding:28px}p{color:#687286;line-height:1.55}</style></head><body><main class="card"><h1>Sign in required</h1><p><?= htmlspecialchars($exception->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></main></body></html><?php
+    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VP3 HomeServers</title><style>body{font-family:system-ui;margin:0;background:#f5f6f8;color:#171b24;display:grid;place-items:center;min-height:100vh}.card{max-width:560px;background:#fff;border:1px solid #e2e6ec;border-radius:16px;padding:28px}p{color:#687286;line-height:1.55}</style></head><body><main class="card"><h1>Sign in required</h1><p>Sign in to an active VP3 owner or administrator account to manage HomeServers.</p></main></body></html><?php
     exit;
 }
 
@@ -77,5 +77,6 @@ header('X-Frame-Options: DENY');
 </main>
 <div id="fleet-secret-modal" class="modal" hidden aria-live="assertive"></div>
 <script src="/assets/homeserver-fleet.js" defer></script>
+<script src="/assets/homeserver-transfer-accept.js" defer></script>
 </body>
 </html>
