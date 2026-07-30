@@ -8,7 +8,7 @@ use Vp3\ControlCenter\ControlCenterPage;
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
-    $context = AccountPageContext::resolve($container);
+    $context = AccountPageContext::resolveForRoles($container, ['customer_owner', 'customer_admin']);
 } catch (AuthPublicException $exception) {
     ControlCenterPage::renderAccessFailure('VP3 Dashboard', $exception);
 }
