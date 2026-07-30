@@ -35,6 +35,7 @@ final class ControlCenterPage
   <title><?= $escape($title) ?> · VP3</title>
   <link rel="stylesheet" href="/assets/control-center.css">
   <link rel="stylesheet" href="/assets/homeserver-control-center-compat.css">
+  <link rel="stylesheet" href="/assets/billing-control-center.css">
 </head>
 <body>
 <div class="app-shell">
