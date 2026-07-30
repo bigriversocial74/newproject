@@ -12,6 +12,10 @@ final class AuthSecretCipher
         private readonly string $keyBase64,
         private readonly string $keyId = 'auth-aes256gcm-v1'
     ) {
+        $this->key();
+        if (trim($this->keyId) === '') {
+            throw new RuntimeException('An authentication secret encryption key ID is required.');
+        }
     }
 
     /** @return array{ciphertext:string,nonce:string,tag:string,key_id:string} */
