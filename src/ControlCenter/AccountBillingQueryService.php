@@ -111,10 +111,14 @@ final class AccountBillingQueryService
                     s.current_period_ends_at,s.grace_ends_at,s.canceled_at,s.updated_at,
                     p.public_id AS plan_public_id,p.code AS plan_code,p.name AS plan_name,
                     p.billing_interval,p.currency,p.price_minor,
+                    sp.billing_interval AS checkout_interval,sp.currency AS checkout_currency,
+                    sp.unit_amount AS checkout_amount,
                     (SELECT COUNT(*) FROM domain_registrations d WHERE d.subscription_id=s.id AND d.status NOT IN ('released','transferred')) AS domain_count,
                     (SELECT COUNT(*) FROM licenses l WHERE l.subscription_id=s.id AND l.status NOT IN ('expired','terminated')) AS license_count
              FROM subscriptions s
              JOIN plans p ON p.id=s.plan_id
+             LEFT JOIN stripe_price_mappings sp
+               ON sp.id=(SELECT MAX(sp2.id) FROM stripe_price_mappings sp2 WHERE sp2.plan_id=p.id AND sp2.active=1)
              WHERE s.account_id=:account
              ORDER BY FIELD(s.status,'past_due','grace','trialing','active','canceled','expired'),s.updated_at DESC,s.id DESC"
         );
@@ -128,9 +132,9 @@ final class AccountBillingQueryService
                 'public_id' => (string) $row['plan_public_id'],
                 'code' => (string) $row['plan_code'],
                 'name' => (string) $row['plan_name'],
-                'billing_interval' => (string) $row['billing_interval'],
-                'currency' => strtoupper((string) $row['currency']),
-                'amount' => (int) $row['price_minor'],
+                'billing_interval' => (string) ($row['checkout_interval'] ?: $row['billing_interval']),
+                'currency' => strtoupper((string) ($row['checkout_currency'] ?: $row['currency'])),
+                'amount' => (int) ($row['checkout_amount'] ?? $row['price_minor']),
             ],
             'starts_at' => $row['starts_at'],
             'period_starts_at' => $row['current_period_starts_at'],
