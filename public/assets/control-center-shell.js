@@ -5,7 +5,9 @@
   if (picker) {
     picker.addEventListener("change", () => {
       const url = new URL(window.location.href);
-      url.searchParams.set("account_id", picker.value);
+      url.searchParams.delete("account_id");
+      url.searchParams.delete("account_public_id");
+      url.searchParams.set("account", picker.value);
       url.hash = "";
       window.location.assign(url.toString());
     });
