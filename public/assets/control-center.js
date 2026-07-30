@@ -114,7 +114,7 @@
     ].join("");
 
     const subscriptions = data.subscriptions.filter((item) => ["active", "trialing"].includes(item.status));
-    document.querySelector("#domain-subscription").innerHTML = '<option value="">Choose an active subscription</option>' + subscriptions.map((item) => `<option value="${item.id}">${escapeHtml(item.plan.name)} · ${escapeHtml(item.public_id)}</option>`).join("");
+    document.querySelector("#domain-subscription").innerHTML = '<option value="">Choose an active subscription</option>' + subscriptions.map((item) => `<option value="${escapeHtml(item.public_id)}">${escapeHtml(item.plan.name)} · ${escapeHtml(item.public_id)}</option>`).join("");
 
     document.querySelector("#domain-list").innerHTML = data.domains.length ? data.domains.map((domain) => {
       const actions = [];
@@ -150,7 +150,7 @@
       return `<article class="card" id="${escapeHtml(pod.public_id)}"><div class="card-top"><div><h4>${escapeHtml(pod.domain.hostname)}</h4><p>${escapeHtml(pod.public_id)} · ${escapeHtml(pod.installed_version || "Installation pending")}</p></div>${status(pod.status)}</div>
         <div class="detail-grid">${detail("Routing", humanize(pod.routing_status))}${detail("SSL", humanize(pod.ssl_status))}${detail("Backup", humanize(pod.backup_status))}${detail("License", humanize(pod.license_status))}${detail("Update channel", pod.update_channel)}${detail("Heartbeat", formatDate(pod.last_heartbeat_at))}${detail("Latest job", job ? `${humanize(job.status)} · ${humanize(job.current_stage || job.job_type)}` : "No job")}${detail("Attempts", job ? job.attempts : 0)}</div>
         <div><p class="subtle">Storage ${escapeHtml(formatBytes(pod.storage_usage_bytes))} of ${escapeHtml(formatBytes(pod.storage_allowance_bytes))} · ${escapeHtml(pod.storage_usage_percent)}%</p><progress class="${progressClass}" max="100" value="${percentage}">${percentage}%</progress></div>
-        ${job?.last_error_code ? `<div class="notice danger section-space">Last worker error: ${escapeHtml(job.last_error_code)}</div>` : ""}
+        ${job?.requires_attention ? '<div class="notice danger section-space">The latest worker attempt requires attention. Review Operations for customer-safe evidence.</div>' : ""}
         <div class="actions section-space">${actions.join("")}</div></article>`;
     }).join("") : '<div class="empty">No POD deployments exist for this account.</div>';
   }
@@ -217,7 +217,7 @@
     setBusy(true);
     try {
       const result = await api("/api/control-center/v1/domain-action.php", {
-        action: "register", subscription_id: Number(document.querySelector("#domain-subscription").value || 0), label: document.querySelector("#domain-label").value,
+        action: "register", subscription_public_id: document.querySelector("#domain-subscription").value, label: document.querySelector("#domain-label").value,
       }, { request: true, idempotency: true });
       showNotice(`${result.hostname} was registered with paired POD and HomeServer licenses.`);
       event.target.reset();
