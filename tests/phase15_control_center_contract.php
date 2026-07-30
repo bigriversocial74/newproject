@@ -44,6 +44,8 @@ $assert(str_contains($shell, "'homeservers' => ['/homeservers.php'"), 'Shared sh
 $assert(str_contains($shell, "header('Cache-Control: no-store')"), 'Control Center pages are cacheable.');
 $assert(str_contains($shell, 'Content-Security-Policy'), 'Control Center pages do not enforce a content security policy.');
 $assert(str_contains($shell, "frame-ancestors 'none'"), 'Control Center pages can be framed.');
+$assert(str_contains($shell, 'http_response_code($exception->httpStatus())'), 'Control Center access pages do not preserve the safe public HTTP status.');
+$assert(str_contains($shell, '$exception->publicMessage()'), 'Control Center access pages do not render the safe public access message.');
 
 foreach ([$overview, $domainAction, $podAction] as $apiFile) {
     $assert(str_contains($apiFile, "ControlCenterEndpoint::requireMethod('POST')"), 'A Phase 15 API endpoint is not POST-only.');
@@ -77,9 +79,10 @@ $assert(!str_contains($podAction, 'processNext('), 'POD worker execution occurs 
 foreach ([$dashboard, $domains, $pods, $homeservers] as $pageFile) {
     $assert(str_contains($pageFile, 'AccountPageContext::resolve'), 'A Control Center page bypasses the shared authenticated account context.');
     $assert(str_contains($pageFile, 'ControlCenterPage::renderStart'), 'A Control Center page bypasses the shared shell.');
-    $assert(str_contains($pageFile, 'catch (AuthPublicException)'), 'A Control Center page masks operational failures as sign-in failures.');
+    $assert(str_contains($pageFile, 'catch (AuthPublicException $exception)'), 'A Control Center page does not isolate safe public access failures.');
+    $assert(str_contains($pageFile, 'ControlCenterPage::renderAccessFailure'), 'A Control Center page does not use the shared safe access renderer.');
     $assert(!str_contains($pageFile, 'catch (Throwable)'), 'A Control Center page catches every operational failure as an access failure.');
-    $assert(!str_contains($pageFile, '$exception->getMessage()'), 'A Control Center page leaks authentication exception details.');
+    $assert(!str_contains($pageFile, '$exception->getMessage()'), 'A Control Center page leaks internal authentication exception details.');
 }
 $assert(str_contains($dashboard, 'dashboard-attention'), 'Dashboard omits prioritized attention items.');
 $assert(str_contains($domains, 'domain-register-form'), 'Domain page omits Domain registration.');
