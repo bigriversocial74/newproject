@@ -50,7 +50,7 @@ final class ControlCenterEndpoint
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
         $requestedAccountId = max(0, (int) ($payload['account_id'] ?? 0));
         $sql = "SELECT account_id FROM account_users WHERE user_id=:user AND status='active'
-                AND role IN ('owner','administrator')";
+                AND role IN ('customer_owner','customer_admin')";
         $parameters = ['user' => (int) $current['user']['id']];
         if ($requestedAccountId > 0) {
             $sql .= ' AND account_id=:account';
@@ -61,7 +61,7 @@ final class ControlCenterEndpoint
         $statement->execute($parameters);
         $accountId = (int) $statement->fetchColumn();
         if ($accountId < 1) {
-            throw new RuntimeException('An active VP3 account owner or administrator membership is required.');
+            throw new RuntimeException('An active VP3 customer owner or administrator membership is required.');
         }
         return ['account_id' => $accountId, 'user' => $current['user'], 'session' => $current['session']];
     }

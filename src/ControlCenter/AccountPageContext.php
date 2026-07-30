@@ -25,7 +25,7 @@ final class AccountPageContext
              FROM account_users au
              JOIN accounts a ON a.id=au.account_id
              WHERE au.user_id=:user AND au.status='active'
-               AND au.role IN ('owner','administrator')
+               AND au.role IN ('customer_owner','customer_admin')
                AND a.status='active'
              ORDER BY a.display_name,a.id"
         );
@@ -34,7 +34,7 @@ final class AccountPageContext
         if ($accounts === []) {
             throw new AuthPublicException(
                 'account_membership_required',
-                'An active VP3 owner or administrator account is required.',
+                'An active VP3 customer owner or administrator account is required.',
                 403
             );
         }

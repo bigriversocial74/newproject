@@ -42,7 +42,7 @@ $assert(str_contains($service, "'event_count_24h'"), 'Fleet response does not bo
 $assert(str_contains($options, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
 $assert(str_contains($options, 'hs.id IS NULL'), 'Eligible-license query does not require an unoccupied license.');
 $assert(str_contains($options, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
-$assert(str_contains($pageContext, "role IN ('owner','administrator')"), 'Fleet page context does not require an owner or administrator role.');
+$assert(str_contains($pageContext, "role IN ('customer_owner','customer_admin')"), 'Fleet page context does not require a customer owner or administrator role.');
 $assert(str_contains($pageShell, "header('Cache-Control: no-store')"), 'Shared fleet page shell does not disable response caching.');
 $assert(str_contains($pageShell, 'Content-Security-Policy'), 'Shared fleet page shell does not enforce a restrictive content security policy.');
 $assert(str_contains($page, 'AccountPageContext::resolve'), 'Fleet page is not using the shared authenticated account context.');
