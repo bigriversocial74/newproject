@@ -31,6 +31,7 @@ final class ControlCenterPage
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?= $escape($title) ?> · VP3</title>
   <link rel="stylesheet" href="/assets/control-center.css">
+  <link rel="stylesheet" href="/assets/homeserver-control-center-compat.css">
 </head>
 <body>
 <div class="app-shell">
