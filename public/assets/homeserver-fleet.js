@@ -87,8 +87,9 @@
     const licenseSelect = document.querySelector("#register-license");
     if (licenseSelect) {
       licenseSelect.innerHTML = `<option value="">Select eligible license</option>${state.options.map((option) => `<option value="${Number(option.license_id)}">${escapeHtml(option.hostname)} · ${escapeHtml(option.plan_name)} · ${escapeHtml(option.license_public_id)}</option>`).join("")}`;
+      licenseSelect.disabled = state.busy;
     }
-    document.querySelectorAll("button").forEach((button) => { if (button.closest("[data-homeserver-fleet]")) button.disabled = state.busy || button.disabled; });
+    document.querySelectorAll("[data-action],#refresh-fleet,#register-form button[type=submit]").forEach((button) => { button.disabled = state.busy; });
     bindActions();
     renderModal();
   }
@@ -117,9 +118,9 @@
     render();
   }
 
-  async function load() {
+  async function load(preserveNotice = false) {
     state.busy = true;
-    state.notice = null;
+    if (!preserveNotice) state.notice = null;
     render();
     try {
       const [fleet, options] = await Promise.all([
@@ -145,15 +146,19 @@
       render();
       return;
     }
-    state.busy = true; render();
+    state.busy = true;
+    render();
     try {
       state.oneTimeBundle = await api("/api/homeserver/v1/register.php", { license_id: licenseId, device_fingerprint: fingerprint, request_id: requestId(), idempotency_key: idempotencyKey() });
       document.querySelector("#register-form")?.reset();
       state.notice = { kind: "success", message: "HomeServer registered. Complete activation in Control Center using the one-time bundle." };
-      await load();
+      await load(true);
     } catch (error) {
       state.notice = { kind: "warning", message: String(error) };
-    } finally { state.busy = false; render(); }
+    } finally {
+      state.busy = false;
+      render();
+    }
   }
 
   async function deviceAction(event) {
@@ -161,27 +166,36 @@
     const card = event.currentTarget.closest("[data-device]");
     const devicePublicId = card?.dataset.device || "";
     if (!devicePublicId) return;
+    state.busy = true;
+    state.notice = null;
+    render();
     try {
       if (action === "suspend" || action === "resume") {
         const confirmation = window.prompt(`Type ${action === "suspend" ? "SUSPEND" : "RESUME"} to continue:`);
         if (confirmation !== (action === "suspend" ? "SUSPEND" : "RESUME")) return;
         await api("/api/homeserver/v1/suspend.php", { device_public_id: devicePublicId, suspended: action === "suspend", request_id: requestId() });
+        state.notice = { kind: "success", message: `HomeServer ${action === "suspend" ? "suspended" : "resumed"}.` };
       } else if (action === "revoke") {
         if (window.prompt("Type REVOKE to permanently revoke this HomeServer:") !== "REVOKE") return;
         await api("/api/homeserver/v1/revoke.php", { device_public_id: devicePublicId, request_id: requestId() });
+        state.notice = { kind: "success", message: "HomeServer revoked and VP3 authority grants were invalidated." };
       } else if (action === "replace") {
         const fingerprint = window.prompt("Paste the replacement HomeServer's 64-character local fingerprint:");
         if (!fingerprint) return;
+        if (!/^[a-f0-9]{64}$/i.test(fingerprint.trim())) throw new Error("The replacement fingerprint must contain exactly 64 hexadecimal characters.");
         state.oneTimeBundle = await api("/api/homeserver/v1/replace.php", { device_public_id: devicePublicId, replacement_fingerprint: fingerprint.trim(), request_id: requestId(), idempotency_key: idempotencyKey() });
+        state.notice = { kind: "success", message: "Replacement registered. Activate the new HomeServer with the one-time bundle." };
       } else if (action === "transfer") {
         const target = Number(window.prompt("Enter the destination VP3 account ID:") || 0);
         if (!target) return;
         const transfer = await api("/api/homeserver/v1/transfer-request.php", { device_public_id: devicePublicId, target_account_id: target, request_id: requestId() });
-        state.notice = { kind: "success", message: `Transfer created. Provide the one-time transfer code to the destination owner: ${transfer.transfer_code || "created"}` };
+        state.notice = { kind: "success", message: `Transfer created. One-time transfer code: ${transfer.transfer_code || "created"}. Expires ${formatDate(transfer.expires_at)}.` };
       }
-      await load();
+      await load(true);
     } catch (error) {
       state.notice = { kind: "warning", message: String(error) };
+    } finally {
+      state.busy = false;
       render();
     }
   }
@@ -191,7 +205,7 @@
   }
 
   document.querySelector("#register-form")?.addEventListener("submit", register);
-  document.querySelector("#refresh-fleet")?.addEventListener("click", load);
-  accountSelect?.addEventListener("change", load);
+  document.querySelector("#refresh-fleet")?.addEventListener("click", () => load());
+  accountSelect?.addEventListener("change", () => load());
   load();
 })();
