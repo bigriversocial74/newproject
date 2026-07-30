@@ -130,7 +130,7 @@ try {
     $service = new FederatedSettingsControlCenterService($database, new FederatedSettingsService($database));
     $initial = $service->snapshot($primary['account'], $primary['user'], 'customer_owner');
     $assert(($initial['account']['public_id'] ?? null) === $primary['account_public'], 'Snapshot did not expose the public account identity.');
-    $assert(($initial['selected_device_public_id'] ?? 'x') === null, 'Account snapshot unexpectedly selected a HomeServer.');
+    $assert(array_key_exists('selected_device_public_id', $initial) && $initial['selected_device_public_id'] === null, 'Account snapshot unexpectedly selected a HomeServer.');
     $assert(count((array) $initial['devices']) === 1 && ($initial['devices'][0]['public_id'] ?? null) === $primaryDevice, 'Account-owned HomeServer list is incorrect.');
     $theme = $setting($initial, 'appearance.theme');
     $assert(is_array($theme) && $theme['requires_device'] === true, 'Shared setting does not require a selected HomeServer.');
@@ -161,7 +161,7 @@ try {
     $accountTheme = $setting($service->snapshot($primary['account'], $primary['user'], 'customer_owner'), 'appearance.theme');
     $assert(is_array($accountTheme) && $accountTheme['value'] === 'system', 'Device value leaked into the account snapshot.');
     $assert($publicException(fn () => $service->update($primary['account'], $primary['user'], 'customer_owner', 'appearance.theme', 'light', 0, $primaryDevice, "REQ22-STALE-{$token}"), 'settings_revision_conflict'), 'Stale revision was not rejected.');
-    $assert($publicException(fn () => $service->update($primary['account'], $primary['user'], 'customer_owner', 'updates.install_window', '03:00-04:00', 0, $primaryDevice, "REQ22-HSAUTH-{$token}"), 'settings_homeserver_authority'), 'HomeServer-authority setting was mutable from VP3.');
+    $assert($publicException(fn () => $service->update($primary['account'], $primary['user'], 'customer_owner', 'updates.install_window', '03:00-04:00', 0, $primaryDevice, "REQ22-HSAUTH-{$token}"), 'settings_not_found'), 'Hidden HomeServer-authority setting was enumerable or mutable from VP3.');
 
     $assert($publicException(fn () => $service->update($primary['account'], $supportUser, 'support_member', 'updates.channel', 'stable', 1, null, "REQ22-SUPPORT-{$token}"), 'settings_permission_denied'), 'Support member update was not denied.');
     $assert($publicException(fn () => $service->update($primary['account'], $billingUser, 'billing_manager', 'updates.channel', 'stable', 1, null, "REQ22-BILLING-{$token}"), 'settings_permission_denied'), 'Billing manager update was not denied.');
