@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/run-vp3-homeserver-cryptographic-builder.yml
       - scripts/build-phase13-homeserver-contract-temp.py
+      - scripts/repair-phase13-builder-temp.py
 
 permissions:
   contents: write
@@ -22,6 +23,8 @@ jobs:
           php-version: '8.3'
           extensions: pdo, pdo_mysql, json, mbstring, sodium, openssl
           coverage: none
+      - name: Repair deterministic builder
+        run: python scripts/repair-phase13-builder-temp.py
       - name: Build product tree
         run: python scripts/build-phase13-homeserver-contract-temp.py
       - name: Validate generated product tree
@@ -34,6 +37,7 @@ jobs:
           rm .github/workflows/build-vp3-homeserver-cryptographic-contract.yml
           rm .github/workflows/run-vp3-homeserver-cryptographic-builder.yml
           rm scripts/build-phase13-homeserver-contract-temp.py
+          rm scripts/repair-phase13-builder-temp.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
