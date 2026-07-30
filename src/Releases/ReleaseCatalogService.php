@@ -40,7 +40,7 @@ final class ReleaseCatalogService
     }
 
     /**
-     * @param list<array{platform:string,architecture:string,storage_reference:string,sha256:string,size_bytes:int}> $artifacts
+     * @param list<array{platform:string,architecture:string,storage_reference:string,file_name?:string,sha256:string,authenticode_thumbprint?:string,size_bytes:int}> $artifacts
      * @param array<string,mixed> $compatibility
      * @return array{release_id:int,release_public_id:string}
      */
@@ -70,11 +70,13 @@ final class ReleaseCatalogService
             $productId, $version, $channel, $artifacts, $compatibility, $rolloutPercentage,
             $emergencyOverride, $releaseNotes, $requestId
         ): array {
-            $product = $pdo->prepare("SELECT id FROM software_products WHERE id=:id AND status='active' LIMIT 1 FOR UPDATE");
-            $product->execute(['id' => $productId]);
-            if (!$product->fetchColumn()) {
+            $productQuery = $pdo->prepare("SELECT id,target_type FROM software_products WHERE id=:id AND status='active' LIMIT 1 FOR UPDATE");
+            $productQuery->execute(['id' => $productId]);
+            $product = $productQuery->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($product)) {
                 throw new RuntimeException('Active software product was not found.');
             }
+            $targetType = (string) $product['target_type'];
             $publicId = 'RELEASE-' . strtoupper(bin2hex(random_bytes(12)));
             $pdo->prepare(
                 'INSERT INTO software_releases
@@ -91,24 +93,42 @@ final class ReleaseCatalogService
             $releaseId = (int) $pdo->lastInsertId();
             $insertArtifact = $pdo->prepare(
                 'INSERT INTO release_artifacts
-                 (release_id,platform,architecture,storage_reference,sha256,size_bytes,created_at)
-                 VALUES (:release,:platform,:architecture,:storage,:sha,:size,UTC_TIMESTAMP())'
+                 (release_id,platform,architecture,storage_reference,file_name,sha256,authenticode_thumbprint,size_bytes,created_at)
+                 VALUES (:release,:platform,:architecture,:storage,:file_name,:sha,:thumbprint,:size,UTC_TIMESTAMP())'
             );
             foreach ($artifacts as $artifact) {
                 $sha = strtolower(trim((string) ($artifact['sha256'] ?? '')));
+                $platform = trim((string) ($artifact['platform'] ?? ''));
+                $architecture = trim((string) ($artifact['architecture'] ?? ''));
+                $storage = trim((string) ($artifact['storage_reference'] ?? ''));
+                $fileName = trim((string) ($artifact['file_name'] ?? ''));
+                $thumbprint = strtoupper(trim((string) ($artifact['authenticode_thumbprint'] ?? '')));
                 if (!preg_match('/^[a-f0-9]{64}$/', $sha)
-                    || trim((string) ($artifact['platform'] ?? '')) === ''
-                    || trim((string) ($artifact['architecture'] ?? '')) === ''
-                    || trim((string) ($artifact['storage_reference'] ?? '')) === ''
+                    || $platform === ''
+                    || $architecture === ''
+                    || $storage === ''
                     || (int) ($artifact['size_bytes'] ?? 0) < 1) {
                     throw new RuntimeException('Release artifact metadata is invalid.');
                 }
+                if ($targetType === 'homeserver') {
+                    if ($fileName !== 'Microgifter-HomeServer-Setup.exe') {
+                        throw new RuntimeException('HomeServer release artifacts must use the canonical installer filename.');
+                    }
+                    if (!preg_match('/^(?:[A-F0-9]{40}|[A-F0-9]{64})$/', $thumbprint)) {
+                        throw new RuntimeException('HomeServer release artifacts require a valid Authenticode signer thumbprint.');
+                    }
+                } else {
+                    $fileName = $fileName === '' ? null : substr($fileName, 0, 190);
+                    $thumbprint = $thumbprint === '' ? null : $thumbprint;
+                }
                 $insertArtifact->execute([
                     'release' => $releaseId,
-                    'platform' => substr(trim((string) $artifact['platform']), 0, 80),
-                    'architecture' => substr(trim((string) $artifact['architecture']), 0, 80),
-                    'storage' => substr(trim((string) $artifact['storage_reference']), 0, 512),
+                    'platform' => substr($platform, 0, 80),
+                    'architecture' => substr($architecture, 0, 80),
+                    'storage' => substr($storage, 0, 512),
+                    'file_name' => $fileName,
                     'sha' => $sha,
+                    'thumbprint' => $thumbprint,
                     'size' => (int) $artifact['size_bytes'],
                 ]);
             }
@@ -231,7 +251,7 @@ final class ReleaseCatalogService
     /** @param array<string,mixed> $release @return array<string,mixed> */
     private function manifest(PDO $pdo, array $release): array
     {
-        $artifacts = $pdo->prepare('SELECT platform,architecture,storage_reference,sha256,size_bytes FROM release_artifacts WHERE release_id=:release ORDER BY platform,architecture');
+        $artifacts = $pdo->prepare('SELECT platform,architecture,storage_reference,file_name,sha256,authenticode_thumbprint,size_bytes FROM release_artifacts WHERE release_id=:release ORDER BY platform,architecture');
         $artifacts->execute(['release' => $release['id']]);
         $compatibility = $pdo->prepare('SELECT minimum_current_version,maximum_current_version,minimum_php_version,database_family,minimum_database_version FROM release_compatibility_rules WHERE release_id=:release LIMIT 1');
         $compatibility->execute(['release' => $release['id']]);
