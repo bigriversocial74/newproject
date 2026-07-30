@@ -74,8 +74,9 @@ return [
         ))),
     ],
     'homeserver' => [
-        'lease_signing_key' => getenv('HOMESERVER_LEASE_SIGNING_KEY') ?: '',
-        'lease_signing_key_id' => getenv('HOMESERVER_LEASE_SIGNING_KEY_ID') ?: 'homeserver-hs256-v1',
+        'lease_signing_private_key_base64' => getenv('VP3_HOMESERVER_LEASE_PRIVATE_KEY_B64') ?: '',
+        'lease_signing_public_key_base64' => getenv('VP3_HOMESERVER_LEASE_PUBLIC_KEY_B64') ?: '',
+        'lease_signing_key_id' => getenv('VP3_HOMESERVER_LEASE_SIGNING_KEY_ID') ?: 'homeserver-lease-ed25519-v1',
         'pairing_ttl_seconds' => max(60, (int) (getenv('HOMESERVER_PAIRING_TTL_SECONDS') ?: 900)),
         'lease_ttl_seconds' => max(300, (int) (getenv('HOMESERVER_LEASE_TTL_SECONDS') ?: 3600)),
         'offline_after_minutes' => max(1, (int) (getenv('HOMESERVER_OFFLINE_AFTER_MINUTES') ?: 10)),
