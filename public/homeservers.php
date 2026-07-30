@@ -2,13 +2,14 @@
 
 declare(strict_types=1);
 
+use Vp3\Auth\AuthPublicException;
 use Vp3\ControlCenter\AccountPageContext;
 use Vp3\ControlCenter\ControlCenterPage;
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
     $context = AccountPageContext::resolve($container);
-} catch (Throwable) {
+} catch (AuthPublicException) {
     ControlCenterPage::renderSignInRequired('VP3 HomeServers');
 }
 ControlCenterPage::renderStart(
