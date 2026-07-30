@@ -13,26 +13,18 @@ try {
     $payload = AuthEndpoint::payload();
     $ip = AuthEndpoint::ip();
     $userAgent = AuthEndpoint::userAgent();
-    $user = $container['auth']->authenticate(
-        (string) ($payload['email'] ?? ''),
-        (string) ($payload['password'] ?? ''),
+    $requestId = trim((string) ($payload['request_id'] ?? ''));
+    if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $requestId)) {
+        $requestId = 'MFAREQ-' . strtoupper(bin2hex(random_bytes(10)));
+    }
+    $challengeToken = trim((string) ($payload['challenge_token'] ?? ''));
+    $user = $container['mfa']->completeChallenge(
+        $challengeToken,
+        (string) ($payload['code'] ?? ''),
         $ip,
         $userAgent,
-        true
+        $requestId
     );
-    if ($user === null) {
-        JsonResponse::send(['error' => ['code' => 'invalid_credentials', 'message' => 'The email or password is incorrect.']], 401);
-    }
-
-    if ($container['mfa']->requiresMfa($user['id'])) {
-        $challenge = $container['mfa']->createChallenge($user['id'], $ip, $userAgent);
-        JsonResponse::send(['data' => [
-            'mfa_required' => true,
-            'challenge_token' => $challenge['challenge_token'],
-            'challenge_public_id' => $challenge['challenge_public_id'],
-            'expires_at' => $challenge['expires_at'],
-        ]], 202);
-    }
 
     $existingToken = $container['session']->applicationToken();
     if ($existingToken !== '') {
@@ -48,10 +40,9 @@ try {
     $applicationSession = $container['database_sessions']->create($user['id'], $ip, $userAgent);
     $container['session']->setApplicationToken($applicationSession['token']);
     unset($applicationSession['token']);
-    $container['auth']->completeLogin($user['id'], $user['public_id']);
+    $container['auth']->completeLogin($user['id'], $user['public_id'], $requestId);
 
     JsonResponse::send(['data' => [
-        'mfa_required' => false,
         'user' => $user,
         'session' => $applicationSession,
         'csrf_token' => $container['session']->csrfToken(),

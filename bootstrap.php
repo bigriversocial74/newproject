@@ -5,11 +5,15 @@ declare(strict_types=1);
 use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthenticationContext;
 use Vp3\Auth\AuthAuditService;
+use Vp3\Auth\AuthRuntimeConfigurationValidator;
+use Vp3\Auth\AuthSecretCipher;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\DatabaseSessionService;
 use Vp3\Auth\Mail\MailAdapterFactory;
+use Vp3\Auth\MfaService;
 use Vp3\Auth\PasswordChangeService;
 use Vp3\Auth\PasswordPolicy;
+use Vp3\Auth\TeamSecurityService;
 use Vp3\Backups\BackupMetadataCipher;
 use Vp3\Backups\BackupService;
 use Vp3\Billing\BillingGraceService;
@@ -48,13 +52,9 @@ $autoload = __DIR__ . '/vendor/autoload.php';
 if (!is_file($autoload)) {
     spl_autoload_register(static function (string $class): void {
         $prefix = 'Vp3\\';
-        if (!str_starts_with($class, $prefix)) {
-            return;
-        }
+        if (!str_starts_with($class, $prefix)) return;
         $path = __DIR__ . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-        if (is_file($path)) {
-            require $path;
-        }
+        if (is_file($path)) require $path;
     });
 } else {
     require $autoload;
@@ -62,12 +62,12 @@ if (!is_file($autoload)) {
 
 $configFile = __DIR__ . '/config/config.php';
 $usingExampleConfig = !is_file($configFile);
-if ($usingExampleConfig) {
-    $configFile = __DIR__ . '/config/config-example.php';
-}
+if ($usingExampleConfig) $configFile = __DIR__ . '/config/config-example.php';
 $config = require $configFile;
 $runtimeConfigurationValidator = new RuntimeConfigurationValidator();
 $runtimeConfigurationValidator->validate($config, $usingExampleConfig);
+$authRuntimeConfigurationValidator = new AuthRuntimeConfigurationValidator();
+$authRuntimeConfigurationValidator->validate($config, $usingExampleConfig);
 $environment = strtolower((string) $config['app']['env']);
 $queueLeaseSeconds = (int) $config['queue']['lease_seconds'];
 
@@ -76,10 +76,7 @@ $passwordPolicy = new PasswordPolicy((int) $config['auth']['password_min_length'
 $authAudit = new AuthAuditService($database);
 $mailAdapter = MailAdapterFactory::create((array) $config['mail'], $environment);
 $authConfig = array_merge((array) $config['auth'], ['base_url' => (string) $config['app']['base_url']]);
-$session = new SessionManager([
-    'name' => (string) $config['app']['session_name'],
-    'secure' => (bool) $config['app']['session_secure'],
-]);
+$session = new SessionManager(['name' => (string) $config['app']['session_name'], 'secure' => (bool) $config['app']['session_secure']]);
 $databaseSessions = new DatabaseSessionService(
     $database,
     (int) $config['auth']['session_inactivity_ttl_seconds'],
@@ -90,6 +87,24 @@ $authenticationContext = new AuthenticationContext($session, $databaseSessions);
 $passwordChanges = new PasswordChangeService($database, $passwordPolicy, $authAudit);
 $auth = new AuthService($database, $passwordPolicy, $mailAdapter, $authConfig, $authAudit);
 $accountSecurity = new AccountSecurityService($database, $passwordPolicy, $mailAdapter, $authConfig, $authAudit);
+$authSecretCipher = new AuthSecretCipher(
+    (string) ($config['auth']['secret_encryption_key_base64'] ?? getenv('AUTH_SECRET_ENCRYPTION_KEY_B64') ?: ''),
+    (string) ($config['auth']['secret_encryption_key_id'] ?? getenv('AUTH_SECRET_ENCRYPTION_KEY_ID') ?: 'auth-aes256gcm-v1')
+);
+$mfa = new MfaService(
+    $database,
+    $authSecretCipher,
+    $authAudit,
+    (int) ($config['auth']['mfa_challenge_ttl_seconds'] ?? 300),
+    (int) ($config['auth']['mfa_recovery_code_count'] ?? 10)
+);
+$teamSecurity = new TeamSecurityService(
+    $database,
+    $mailAdapter,
+    $authAudit,
+    (string) $config['app']['base_url'],
+    (int) ($config['auth']['team_invitation_ttl_seconds'] ?? 604800)
+);
 $planCatalog = new PlanCatalogService($database);
 $subscriptionLifecycle = new SubscriptionLifecycleService($database);
 $domainRegistry = new DomainRegistryService($database);
@@ -119,32 +134,15 @@ $releaseCatalog = new ReleaseCatalogService($database, $releaseManifestSigner);
 $softwareUpdateAdapter = AdapterFactory::updates((string) $config['releases']['update_provider_driver'], $environment);
 $softwareUpdates = new SoftwareUpdateService($database, $softwareUpdateAdapter, $queueLeaseSeconds);
 $backupProviderAdapter = AdapterFactory::backups((string) $config['backups']['provider_driver'], $environment);
-$backupMetadataCipher = new BackupMetadataCipher(
-    (string) $config['backups']['metadata_encryption_key_base64'],
-    (string) $config['backups']['metadata_encryption_key_id']
-);
-$backups = new BackupService(
-    $database,
-    $backupProviderAdapter,
-    $backupMetadataCipher,
-    (float) $config['backups']['warning_threshold_percent'],
-    (float) $config['backups']['critical_threshold_percent'],
-    $queueLeaseSeconds
-);
+$backupMetadataCipher = new BackupMetadataCipher((string) $config['backups']['metadata_encryption_key_base64'], (string) $config['backups']['metadata_encryption_key_id']);
+$backups = new BackupService($database, $backupProviderAdapter, $backupMetadataCipher, (float) $config['backups']['warning_threshold_percent'], (float) $config['backups']['critical_threshold_percent'], $queueLeaseSeconds);
 $infrastructureConfig = (array) ($config['infrastructure'] ?? []);
 $providerSecretCipher = new ProviderSecretCipher(
     (string) ($infrastructureConfig['secret_encryption_key_base64'] ?? getenv('PROVIDER_SECRET_ENCRYPTION_KEY_B64') ?: ''),
     (string) ($infrastructureConfig['secret_encryption_key_id'] ?? getenv('PROVIDER_SECRET_ENCRYPTION_KEY_ID') ?: 'provider-aes256gcm-v1')
 );
 $infrastructureAdapters = AdapterFactory::infrastructure((string) ($infrastructureConfig['provider_driver'] ?? 'null'), $environment);
-$infrastructure = new InfrastructureProviderService(
-    $database,
-    $providerSecretCipher,
-    $infrastructureAdapters['hosting'],
-    $infrastructureAdapters['dns'],
-    $infrastructureAdapters['certificate'],
-    $queueLeaseSeconds
-);
+$infrastructure = new InfrastructureProviderService($database, $providerSecretCipher, $infrastructureAdapters['hosting'], $infrastructureAdapters['dns'], $infrastructureAdapters['certificate'], $queueLeaseSeconds);
 $operationsConfig = (array) ($config['operations'] ?? []);
 $operationsSecretCipher = new OperationsSecretCipher(
     (string) ($operationsConfig['secret_encryption_key_base64'] ?? getenv('OPERATIONS_SECRET_ENCRYPTION_KEY_B64') ?: ''),
@@ -152,41 +150,23 @@ $operationsSecretCipher = new OperationsSecretCipher(
 );
 $operationalNotificationAdapter = AdapterFactory::notifications((string) ($operationsConfig['notification_driver'] ?? 'null'), $environment);
 $operationalAudit = new OperationalAuditService($database);
-$operationalNotifications = new OperationalNotificationService(
-    $database,
-    $operationsSecretCipher,
-    $operationalNotificationAdapter,
-    $operationalAudit,
-    $queueLeaseSeconds
-);
-$operationalIncidents = new OperationalIncidentService(
-    $database,
-    $operationalAudit,
-    $operationalNotifications
-);
-$operationsMonitor = new OperationsMonitorService(
-    $database,
-    $operationalIncidents,
-    $operationalAudit,
-    (int) ($operationsConfig['pod_offline_after_minutes'] ?? 10),
-    (int) ($operationsConfig['homeserver_offline_after_minutes'] ?? 10)
-);
-$operations = new OperationsReadinessService(
-    $database,
-    $operationalAudit,
-    $operationalNotifications,
-    $operationalIncidents,
-    $operationsMonitor
-);
+$operationalNotifications = new OperationalNotificationService($database, $operationsSecretCipher, $operationalNotificationAdapter, $operationalAudit, $queueLeaseSeconds);
+$operationalIncidents = new OperationalIncidentService($database, $operationalAudit, $operationalNotifications);
+$operationsMonitor = new OperationsMonitorService($database, $operationalIncidents, $operationalAudit, (int) ($operationsConfig['pod_offline_after_minutes'] ?? 10), (int) ($operationsConfig['homeserver_offline_after_minutes'] ?? 10));
+$operations = new OperationsReadinessService($database, $operationalAudit, $operationalNotifications, $operationalIncidents, $operationsMonitor);
 
 return [
     'config' => $config,
     'runtime_configuration_validator' => $runtimeConfigurationValidator,
+    'auth_runtime_configuration_validator' => $authRuntimeConfigurationValidator,
     'database' => $database,
     'auth_audit' => $authAudit,
     'mail_adapter' => $mailAdapter,
     'auth' => $auth,
     'account_security' => $accountSecurity,
+    'auth_secret_cipher' => $authSecretCipher,
+    'mfa' => $mfa,
+    'team_security' => $teamSecurity,
     'database_sessions' => $databaseSessions,
     'authentication_context' => $authenticationContext,
     'password_changes' => $passwordChanges,

@@ -14,14 +14,21 @@ final class ControlCenterPage
         self::securityHeaders();
         $accounts = $context['accounts'];
         $selected = $context['selected'];
+        $role = (string) ($selected['role'] ?? 'support_member');
         $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $nav = [
-            'dashboard' => ['/dashboard.php', 'Dashboard'],
-            'billing' => ['/billing.php', 'Billing & Plans'],
-            'domains' => ['/domains.php', 'Domains'],
-            'pods' => ['/pods.php', 'PODs'],
-            'homeservers' => ['/homeservers.php', 'HomeServers'],
-        ];
+        $nav = [];
+        if (in_array($role, ['customer_owner', 'customer_admin'], true)) {
+            $nav = [
+                'dashboard' => ['/dashboard.php', 'Dashboard'],
+                'billing' => ['/billing.php', 'Billing & Plans'],
+                'domains' => ['/domains.php', 'Domains'],
+                'pods' => ['/pods.php', 'PODs'],
+                'homeservers' => ['/homeservers.php', 'HomeServers'],
+            ];
+        } elseif ($role === 'billing_manager') {
+            $nav = ['billing' => ['/billing.php', 'Billing & Plans']];
+        }
+        $nav['account-security'] = ['/account-security.php', 'Account & Security'];
         ?>
 <!doctype html>
 <html lang="en">
@@ -32,11 +39,12 @@ final class ControlCenterPage
   <link rel="stylesheet" href="/assets/control-center.css">
   <link rel="stylesheet" href="/assets/homeserver-control-center-compat.css">
   <link rel="stylesheet" href="/assets/billing-control-center.css">
+  <link rel="stylesheet" href="/assets/account-security.css">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="/dashboard.php?account_id=<?= (int) $selected['id'] ?>" aria-label="VP3 Dashboard">
+    <a class="brand" href="<?= $role === 'billing_manager' ? '/billing.php' : ($role === 'support_member' ? '/account-security.php' : '/dashboard.php') ?>?account_id=<?= (int) $selected['id'] ?>" aria-label="VP3 Control Center">
       <span class="brand-mark">V3</span><span><strong>VP3</strong><small>Personal Online Deployment</small></span>
     </a>
     <nav class="nav" aria-label="VP3 Control Center">
