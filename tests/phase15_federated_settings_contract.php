@@ -27,6 +27,7 @@ $deviceEndpoint = $read('public/api/homeserver/v1/settings-sync.php');
 $browserEndpoint = $read('public/api/settings/v1/update.php');
 $snapshotEndpoint = $read('public/api/settings/v1/snapshot.php');
 $endpointBoundary = $read('src/Http/HomeServerEndpoint.php');
+$accountPageContext = $read('src/ControlCenter/AccountPageContext.php');
 $settingsPage = $read('public/settings.php');
 $fleetPage = $read('public/homeservers.php');
 $javascript = $read('public/assets/federated-settings.js');
@@ -45,6 +46,8 @@ $assert(str_contains($service, 'authenticateDevice'), 'Device settings synchroni
 $assert(str_contains($service, "SELECT request_hash FROM federated_settings_sync_receipts"), 'Request replay does not load the canonical request hash.');
 $assert(str_contains($service, 'request ID was reused with a different payload'), 'Request IDs are not bound to one canonical payload.');
 $assert(str_contains($service, 'duplicate setting key'), 'Duplicate setting keys are not rejected before synchronization.');
+$assert(str_contains($service, '$this->database->transaction(function (PDO $pdo) use ($device, $requestId, $requestHash'), 'Request claiming and setting mutation are not enclosed in one transaction.');
+$assert(str_contains($service, "str_repeat('0', 64)") && str_contains($service, 'Unable to finalize the settings sync request receipt.'), 'Atomic request claim finalization is incomplete.');
 $assert(str_contains($signerSource, "algorithm() !== 'Ed25519'"), 'Federated settings do not fail closed without Ed25519.');
 foreach (['generated_at', 'replayed', 'applied', 'conflicts'] as $signedField) {
     $assert(str_contains($signerSource, "'{$signedField}' =>"), "Federated settings signature does not bind {$signedField}.");
@@ -54,9 +57,10 @@ $assert(str_contains($deviceEndpoint, 'requestId'), 'Device sync endpoint does n
 $assert(str_contains($deviceEndpoint, 'FederatedSettingsSigner'), 'Device sync response is not signed.');
 $assert(str_contains($browserEndpoint, 'accountContext'), 'Browser setting mutation is not account scoped.');
 $assert(str_contains($browserEndpoint, 'FederatedSettingsSigner') && str_contains($snapshotEndpoint, 'FederatedSettingsSigner'), 'Browser settings snapshots are not signed.');
-foreach ([$endpointBoundary, $settingsPage, $fleetPage] as $roleBoundary) {
+foreach ([$endpointBoundary, $settingsPage, $accountPageContext] as $roleBoundary) {
     $assert(str_contains($roleBoundary, 'customer_owner') && str_contains($roleBoundary, 'customer_admin'), 'A dashboard authorization boundary uses obsolete account roles.');
 }
+$assert(str_contains($fleetPage, 'AccountPageContext::resolve'), 'HomeServer Fleet bypasses the shared account authorization context.');
 $assert(!str_contains($javascript, 'localStorage') && !str_contains($javascript, 'sessionStorage'), 'Browser settings UI persists state in browser storage.');
 foreach (['secret_key','private_key','password','credential'] as $forbidden) {
     $assert(!str_contains($migration, "'{$forbidden}."), "Secret-like setting key {$forbidden} entered the federated catalog.");
@@ -93,8 +97,8 @@ if (function_exists('sodium_crypto_sign_keypair')) {
     $claims = json_decode((string) base64_decode($document, true), true, 32, JSON_THROW_ON_ERROR);
     $assert(($claims['snapshot_hash'] ?? null) === str_repeat('a', 64), 'Signed settings document does not bind the snapshot hash.');
     $assert(($claims['generated_at'] ?? null) === '2026-07-30T07:00:00+00:00', 'Signed settings document does not bind generation time.');
-    $assert(($claims['applied'] ?? null) === $applied, 'Signed settings document does not bind applied updates.');
-    $assert(($claims['conflicts'] ?? null) === $conflicts, 'Signed settings document does not bind conflicts.');
+    $assert(($claims['applied'] ?? null) == $applied, 'Signed settings document does not bind applied updates.');
+    $assert(($claims['conflicts'] ?? null) == $conflicts, 'Signed settings document does not bind conflicts.');
     $assert(($claims['replayed'] ?? null) === false, 'Signed settings document does not bind replay state.');
     $assert((int) ($claims['exp'] ?? 0) > (int) ($claims['iat'] ?? 0), 'Signed settings document expiration is invalid.');
 } else {
