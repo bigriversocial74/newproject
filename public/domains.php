@@ -9,8 +9,8 @@ use Vp3\ControlCenter\ControlCenterPage;
 $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
     $context = AccountPageContext::resolve($container);
-} catch (AuthPublicException) {
-    ControlCenterPage::renderSignInRequired('VP3 Domains');
+} catch (AuthPublicException $exception) {
+    ControlCenterPage::renderAccessFailure('VP3 Domains', $exception);
 }
 ControlCenterPage::renderStart(
     $context,
