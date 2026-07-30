@@ -22,6 +22,8 @@ $options = $read('src/HomeServers/HomeServerRegistrationOptionsService.php');
 $endpoint = $read('public/api/homeserver/v1/fleet.php');
 $optionsEndpoint = $read('public/api/homeserver/v1/registration-options.php');
 $page = $read('public/homeservers.php');
+$pageContext = $read('src/ControlCenter/AccountPageContext.php');
+$pageShell = $read('src/ControlCenter/ControlCenterPage.php');
 $client = $read('public/assets/homeserver-fleet.js');
 $transferClient = $read('public/assets/homeserver-transfer-accept.js');
 
@@ -40,9 +42,11 @@ $assert(str_contains($service, "'event_count_24h'"), 'Fleet response does not bo
 $assert(str_contains($options, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
 $assert(str_contains($options, 'hs.id IS NULL'), 'Eligible-license query does not require an unoccupied license.');
 $assert(str_contains($options, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
-$assert(str_contains($page, "role IN ('owner','administrator')"), 'Fleet page does not require an owner or administrator role.');
-$assert(str_contains($page, "header('Cache-Control: no-store')"), 'Fleet page does not disable response caching.');
-$assert(str_contains($page, 'Content-Security-Policy'), 'Fleet page does not enforce a restrictive content security policy.');
+$assert(str_contains($pageContext, "role IN ('owner','administrator')"), 'Fleet page context does not require an owner or administrator role.');
+$assert(str_contains($pageShell, "header('Cache-Control: no-store')"), 'Shared fleet page shell does not disable response caching.');
+$assert(str_contains($pageShell, 'Content-Security-Policy'), 'Shared fleet page shell does not enforce a restrictive content security policy.');
+$assert(str_contains($page, 'AccountPageContext::resolve'), 'Fleet page is not using the shared authenticated account context.');
+$assert(str_contains($page, "'homeservers'"), 'Fleet page is not registered in the shared control center navigation state.');
 $assert(str_contains($client, '/api/homeserver/v1/register.php'), 'Fleet client cannot register a HomeServer.');
 $assert(str_contains($client, '/api/homeserver/v1/replace.php'), 'Fleet client cannot replace a HomeServer.');
 $assert(str_contains($client, '/api/homeserver/v1/transfer-request.php'), 'Fleet client cannot request a transfer.');
