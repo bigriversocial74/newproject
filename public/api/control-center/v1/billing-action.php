@@ -10,7 +10,11 @@ ControlCenterEndpoint::requireMethod('POST');
 
 try {
     $payload = ControlCenterEndpoint::payload();
-    $account = ControlCenterEndpoint::accountContext($container, $payload);
+    $account = ControlCenterEndpoint::accountContext(
+        $container,
+        $payload,
+        ['customer_owner', 'customer_admin', 'billing_manager']
+    );
     $action = strtolower(trim((string) ($payload['action'] ?? '')));
     $requestId = ControlCenterEndpoint::requestId($payload);
     $idempotencyKey = ControlCenterEndpoint::idempotencyKey($payload);
