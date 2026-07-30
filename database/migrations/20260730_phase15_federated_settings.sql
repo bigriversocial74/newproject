@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS federated_settings_sync_receipts (
     account_id BIGINT UNSIGNED NOT NULL,
     device_id BIGINT UNSIGNED NULL,
     request_id VARCHAR(64) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
     direction ENUM('vp3_update','device_push','device_pull') NOT NULL,
     base_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
     applied_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
@@ -60,6 +61,29 @@ CREATE TABLE IF NOT EXISTS federated_settings_sync_receipts (
     CONSTRAINT fk_federated_sync_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
     CONSTRAINT fk_federated_sync_device FOREIGN KEY (device_id) REFERENCES homeserver_devices(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP PROCEDURE IF EXISTS vp3_phase15_request_hash_upgrade;
+DELIMITER $$
+CREATE PROCEDURE vp3_phase15_request_hash_upgrade()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'federated_settings_sync_receipts'
+          AND column_name = 'request_hash'
+    ) THEN
+        ALTER TABLE federated_settings_sync_receipts
+            ADD COLUMN request_hash CHAR(64) NULL AFTER request_id;
+        UPDATE federated_settings_sync_receipts
+        SET request_hash = SHA2(CONCAT('legacy:', id, ':', request_id), 256)
+        WHERE request_hash IS NULL;
+        ALTER TABLE federated_settings_sync_receipts
+            MODIFY COLUMN request_hash CHAR(64) NOT NULL;
+    END IF;
+END$$
+DELIMITER ;
+CALL vp3_phase15_request_hash_upgrade();
+DROP PROCEDURE IF EXISTS vp3_phase15_request_hash_upgrade;
 
 INSERT INTO federated_setting_catalog
 (setting_key,label,description,category,authority,value_type,default_value_json,allowed_values_json,visible_in_vp3,visible_in_homeserver,sensitivity,created_at,updated_at)
