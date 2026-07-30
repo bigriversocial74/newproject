@@ -10,7 +10,8 @@
     "ext-json": "*",
     "ext-mbstring": "*",
     "ext-openssl": "*",
-    "ext-sodium": "*"
+    "ext-sodium": "*",
+    "ext-zip": "*"
   },
   "autoload": {
     "psr-4": {

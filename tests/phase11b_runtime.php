@@ -63,6 +63,11 @@ $base = [
         'login_attempt_window_seconds' => 900,
     ],
     'mail' => ['driver' => 'null'],
+    'provisioning' => ['provider_driver' => 'null'],
+    'infrastructure' => ['provider_driver' => 'null'],
+    'backups' => ['provider_driver' => 'null'],
+    'releases' => ['update_provider_driver' => 'null'],
+    'operations' => ['notification_driver' => 'null'],
 ];
 try {
     $validator->validate($base, true);
