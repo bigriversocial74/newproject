@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Vp3\Http\ControlCenterEndpoint;
 use Vp3\Http\JsonResponse;
 use Vp3\Lifecycle\DomainPodLifecycleActionService;
+use Vp3\Lifecycle\PodRollbackLifecycleService;
 
 $container = require __DIR__ . '/_bootstrap.php';
 ControlCenterEndpoint::requireMethod('POST');
@@ -19,6 +20,10 @@ try {
     $service = new DomainPodLifecycleActionService(
         $container['database'],
         $container['domain_registry'],
+        $container['pod_provisioning']
+    );
+    $rollback = new PodRollbackLifecycleService(
+        $container['database'],
         $container['pod_provisioning']
     );
     $action = strtolower(trim((string) ($payload['action'] ?? '')));
@@ -42,7 +47,7 @@ try {
             $action,
             $requestId
         ),
-        'rollback' => $service->rollbackPod(
+        'rollback' => $rollback->enqueue(
             $account['account_id'],
             $actorId,
             $account['role'],
