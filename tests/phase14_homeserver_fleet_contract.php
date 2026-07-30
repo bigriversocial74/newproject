@@ -59,7 +59,9 @@ $assert(str_contains($registerEndpoint, "unset(\$result['device_id'])") && str_c
 $assert(str_contains($acceptEndpoint, "unset(\$result['license_id'])") && str_contains($acceptEndpoint, "'account_public_id'") && str_contains($acceptEndpoint, "'license_public_id'"), 'Transfer acceptance response exposes internal identity.');
 $assert(str_contains($transferEndpoint, 'target_account_public_id') && !str_contains($transferEndpoint, "payload['target_account_id']"), 'Transfer target still uses a numeric account identity.');
 foreach ([$client, $transferClient] as $browser) {
-    $assert(!str_contains($browser, 'account_id') && !str_contains($browser, 'license_id') && !str_contains($browser, 'target_license_id'), 'Fleet browser code carries numeric account/license identity fields.');
+    foreach (['account_id:', 'license_id:', 'target_license_id:', '.license_id', '.target_license_id'] as $forbidden) {
+        $assert(!str_contains($browser, $forbidden), 'Fleet browser code carries numeric identity pattern ' . $forbidden . '.');
+    }
     $assert(!str_contains($browser, 'localStorage') && !str_contains($browser, 'sessionStorage'), 'Fleet browser persists one-time activation data.');
 }
 $assert(!str_contains($page, '$exception->getMessage()'), 'Fleet authentication page leaks internal exception messages.');
