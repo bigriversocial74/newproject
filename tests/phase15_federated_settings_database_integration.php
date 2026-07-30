@@ -91,18 +91,39 @@ try {
     }
     $assert($staleRejected, 'Stale browser revision was not rejected.');
 
-    $sync = $service->synchronizeDevice($devicePublic, $credential, 'REQ-P15-' . strtoupper($token), 1, [
+    $requestId = 'REQ-P15-' . strtoupper($token);
+    $updates = [
         ['setting_key' => 'updates.install_window', 'value' => '03:00-04:00', 'expected_revision' => 0],
         ['setting_key' => 'appearance.theme', 'value' => 'light', 'expected_revision' => 1],
         ['setting_key' => 'updates.channel', 'value' => 'beta', 'expected_revision' => 0],
-    ]);
+    ];
+    $sync = $service->synchronizeDevice($devicePublic, $credential, $requestId, 1, $updates);
     $assert(count($sync['applied']) === 2, 'Device sync did not apply the permitted settings.');
     $assert(count($sync['conflicts']) === 1 && $sync['conflicts'][0]['reason'] === 'vp3_authority', 'Device sync did not reject the VP3-owned setting.');
     $deviceWindow = array_values(array_filter($sync['settings'], static fn (array $setting): bool => $setting['setting_key'] === 'updates.install_window'))[0] ?? null;
     $assert(is_array($deviceWindow) && $deviceWindow['value'] === '03:00-04:00', 'Device-owned setting was not persisted at device scope.');
 
-    $replay = $service->synchronizeDevice($devicePublic, $credential, 'REQ-P15-' . strtoupper($token), 1, []);
+    $replay = $service->synchronizeDevice($devicePublic, $credential, $requestId, 1, $updates);
     $assert($replay['replayed'] === true, 'Device sync request replay was not detected.');
+
+    $requestMismatchRejected = false;
+    try {
+        $service->synchronizeDevice($devicePublic, $credential, $requestId, 1, []);
+    } catch (RuntimeException $exception) {
+        $requestMismatchRejected = str_contains(strtolower($exception->getMessage()), 'different payload');
+    }
+    $assert($requestMismatchRejected, 'A request ID reused with a different payload was not rejected.');
+
+    $duplicateKeyRejected = false;
+    try {
+        $service->synchronizeDevice($devicePublic, $credential, 'REQ-DUP-' . strtoupper($token), 1, [
+            ['setting_key' => 'appearance.theme', 'value' => 'dark', 'expected_revision' => 2],
+            ['setting_key' => 'appearance.theme', 'value' => 'light', 'expected_revision' => 2],
+        ]);
+    } catch (RuntimeException $exception) {
+        $duplicateKeyRejected = str_contains(strtolower($exception->getMessage()), 'duplicate setting key');
+    }
+    $assert($duplicateKeyRejected, 'Duplicate setting keys were not rejected before synchronization.');
 
     $accountSnapshot = $service->snapshotForAccount($primary['account']);
     $accountWindow = array_values(array_filter($accountSnapshot['settings'], static fn (array $setting): bool => $setting['setting_key'] === 'updates.install_window'))[0] ?? null;
