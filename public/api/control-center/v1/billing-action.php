@@ -17,7 +17,7 @@ try {
     $baseUrl = rtrim((string) ($container['config']['app']['base_url'] ?? ''), '/');
     $scheme = strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME));
     if ($scheme !== 'https') {
-        throw new RuntimeException('Billing redirects require an HTTPS application base URL.');
+        throw new RuntimeException('Secure billing is temporarily unavailable.');
     }
 
     $billingPage = $baseUrl . '/billing.php?account_id=' . $account['account_id'];
@@ -38,14 +38,21 @@ try {
         if ($planId < 1) {
             throw new RuntimeException('The selected billing plan is not available for checkout.');
         }
-        $result = $container['stripe_checkout']->createCheckoutSession(
-            $account['account_id'],
-            $planId,
-            $billingPage . '&checkout=success',
-            $billingPage . '&checkout=canceled',
-            $requestId,
-            $idempotencyKey
-        );
+        try {
+            $result = $container['stripe_checkout']->createCheckoutSession(
+                $account['account_id'],
+                $planId,
+                $billingPage . '&checkout=success',
+                $billingPage . '&checkout=canceled',
+                $requestId,
+                $idempotencyKey
+            );
+        } catch (RuntimeException $exception) {
+            if (str_contains($exception->getMessage(), 'idempotency key was reused')) {
+                throw $exception;
+            }
+            throw new RuntimeException('Secure billing checkout could not be created.');
+        }
         $url = trustedStripeRedirect($result['url'] ?? null, 'checkout.stripe.com');
         JsonResponse::send(['data' => [
             'action' => 'checkout',
@@ -57,12 +64,22 @@ try {
     }
 
     if ($action === 'portal') {
-        $result = $container['stripe_checkout']->createPortalSession(
-            $account['account_id'],
-            $billingPage,
-            $requestId,
-            $idempotencyKey
-        );
+        try {
+            $result = $container['stripe_checkout']->createPortalSession(
+                $account['account_id'],
+                $billingPage,
+                $requestId,
+                $idempotencyKey
+            );
+        } catch (RuntimeException $exception) {
+            if (str_contains($exception->getMessage(), 'Stripe customer is required')) {
+                throw new RuntimeException('The secure billing portal is not available until billing is activated for this account.');
+            }
+            if (str_contains($exception->getMessage(), 'idempotency key was reused')) {
+                throw $exception;
+            }
+            throw new RuntimeException('The secure billing portal could not be opened.');
+        }
         $url = trustedStripeRedirect($result['url'] ?? null, 'billing.stripe.com');
         JsonResponse::send(['data' => [
             'action' => 'portal',
@@ -80,13 +97,13 @@ try {
 function trustedStripeRedirect(mixed $value, string $expectedHost): string
 {
     if (!is_string($value) || trim($value) === '') {
-        throw new RuntimeException('Stripe did not return a billing redirect URL.');
+        throw new RuntimeException('The billing provider did not return a secure redirect.');
     }
     $url = trim($value);
     $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
     $host = strtolower((string) parse_url($url, PHP_URL_HOST));
     if ($scheme !== 'https' || $host !== strtolower($expectedHost)) {
-        throw new RuntimeException('Stripe returned an untrusted billing redirect URL.');
+        throw new RuntimeException('The billing provider returned an untrusted redirect.');
     }
     return $url;
 }
