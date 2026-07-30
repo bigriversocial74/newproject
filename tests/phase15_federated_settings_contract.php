@@ -42,6 +42,9 @@ $assert(str_contains($service, 'expectedRevision !== $currentRevision'), 'Optimi
 $assert(str_contains($service, "'vp3_authority'"), 'Device writes do not reject VP3-owned settings.');
 $assert(str_contains($service, 'authenticateDevice'), 'Device settings synchronization is not credential authenticated.');
 $assert(str_contains($signerSource, "algorithm() !== 'Ed25519'"), 'Federated settings do not fail closed without Ed25519.');
+foreach (['generated_at', 'replayed', 'applied', 'conflicts'] as $signedField) {
+    $assert(str_contains($signerSource, "'{$signedField}' =>"), "Federated settings signature does not bind {$signedField}.");
+}
 $assert(str_contains($deviceEndpoint, 'bearerCredential'), 'Device sync endpoint does not require a bearer credential.');
 $assert(str_contains($deviceEndpoint, 'requestId'), 'Device sync endpoint does not require a request ID.');
 $assert(str_contains($deviceEndpoint, 'FederatedSettingsSigner'), 'Device sync response is not signed.');
@@ -63,13 +66,19 @@ if (function_exists('sodium_crypto_sign_keypair')) {
     $public = base64_encode(sodium_crypto_sign_publickey($pair));
     $leaseSigner = new Vp3\HomeServers\HomeServerLeaseSigner($private, $public, 'homeserver-lease-test-v1');
     $settingsSigner = new Vp3\Settings\FederatedSettingsSigner($leaseSigner);
+    $applied = [['setting_key' => 'appearance.theme', 'revision' => 2, 'index' => 0]];
+    $conflicts = [['setting_key' => 'updates.channel', 'reason' => 'vp3_authority', 'current_revision' => 1]];
     $signed = $settingsSigner->sign([
         'schema' => 'vp3.federated-settings.v1',
         'account_id' => 7,
         'device_public_id' => 'HS-TEST',
         'max_revision' => 2,
         'settings' => [['setting_key' => 'appearance.theme', 'value' => 'dark']],
+        'generated_at' => '2026-07-30T07:00:00+00:00',
         'snapshot_hash' => str_repeat('a', 64),
+        'replayed' => false,
+        'applied' => $applied,
+        'conflicts' => $conflicts,
     ]);
     $assert($signed['signature_algorithm'] === 'Ed25519', 'Federated settings signer did not emit Ed25519.');
     $assert($signed['signing_key_id'] === 'homeserver-lease-test-v1', 'Federated settings signer emitted the wrong key ID.');
@@ -79,6 +88,10 @@ if (function_exists('sodium_crypto_sign_keypair')) {
     if ($padding > 0) $document .= str_repeat('=', 4 - $padding);
     $claims = json_decode((string) base64_decode($document, true), true, 32, JSON_THROW_ON_ERROR);
     $assert(($claims['snapshot_hash'] ?? null) === str_repeat('a', 64), 'Signed settings document does not bind the snapshot hash.');
+    $assert(($claims['generated_at'] ?? null) === '2026-07-30T07:00:00+00:00', 'Signed settings document does not bind generation time.');
+    $assert(($claims['applied'] ?? null) === $applied, 'Signed settings document does not bind applied updates.');
+    $assert(($claims['conflicts'] ?? null) === $conflicts, 'Signed settings document does not bind conflicts.');
+    $assert(($claims['replayed'] ?? null) === false, 'Signed settings document does not bind replay state.');
     $assert((int) ($claims['exp'] ?? 0) > (int) ($claims['iat'] ?? 0), 'Signed settings document expiration is invalid.');
 } else {
     $failures[] = 'The sodium extension is required for the Phase 15 signing contract.';
