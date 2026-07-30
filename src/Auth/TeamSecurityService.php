@@ -58,7 +58,7 @@ final class TeamSecurityService
         ], $members->fetchAll(PDO::FETCH_ASSOC));
 
         $invitations = $this->database->pdo()->prepare(
-            "SELECT public_id,invited_email,role,status,expires_at,created_at,updated_at
+            "SELECT public_id,invited_email,role,CASE WHEN status='pending' AND expires_at<=UTC_TIMESTAMP() THEN 'expired' ELSE status END AS status,expires_at,created_at,updated_at
              FROM account_invitations WHERE account_id=:account
              ORDER BY FIELD(status,'pending','accepted','revoked','expired'),created_at DESC,id DESC LIMIT 100"
         );
@@ -172,17 +172,23 @@ final class TeamSecurityService
 
     public function acceptInvitation(int $userId, string $userEmail, string $token, string $requestId): int
     {
-        return $this->database->transaction(function (PDO $pdo) use ($userId, $userEmail, $token, $requestId): int {
+        $result = $this->database->transaction(function (PDO $pdo) use ($userId, $userEmail, $token, $requestId): array {
             $now = new DateTimeImmutable('now');
             $statement = $pdo->prepare('SELECT * FROM account_invitations WHERE token_hash=:hash LIMIT 1 FOR UPDATE');
             $statement->execute(['hash' => hash('sha256', trim($token))]);
             $invite = $statement->fetch(PDO::FETCH_ASSOC);
-            if (!is_array($invite) || (string) $invite['status'] !== 'pending' || $now >= new DateTimeImmutable((string) $invite['expires_at'])) {
+            if (!is_array($invite) || (string) $invite['status'] !== 'pending') {
                 throw new AuthPublicException('team_invitation_invalid', 'The invitation is invalid or expired.', 404);
+            }
+            if ($now >= new DateTimeImmutable((string) $invite['expires_at'])) {
+                $pdo->prepare("UPDATE account_invitations SET status='expired',updated_at=:now WHERE id=:id AND status='pending'")
+                    ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $invite['id']]);
+                $this->receipt($pdo, (int) $invite['account_id'], $userId, $userId, 'team.invitation_accepted', 'denied', $requestId, ['reason' => 'expired']);
+                return ['denied' => 'expired'];
             }
             if (!hash_equals((string) $invite['invited_email_normalized'], strtolower(trim($userEmail)))) {
                 $this->receipt($pdo, (int) $invite['account_id'], $userId, $userId, 'team.invitation_accepted', 'denied', $requestId, ['reason' => 'email_mismatch']);
-                throw new AuthPublicException('team_invitation_email_mismatch', 'Sign in using the email address that received this invitation.', 403);
+                return ['denied' => 'email_mismatch'];
             }
             $pdo->prepare(
                 "INSERT INTO account_users (account_id,user_id,role,status,created_at,updated_at)
@@ -194,8 +200,15 @@ final class TeamSecurityService
             )->execute(['user' => $userId, 'now' => $now->format('Y-m-d H:i:s'), 'id' => $invite['id']]);
             $this->receipt($pdo, (int) $invite['account_id'], $userId, $userId, 'team.invitation_accepted', 'success', $requestId, ['invitation_public_id' => $invite['public_id'], 'role' => $invite['role']]);
             $this->audit->record('team.invitation_accepted', 'success', $userId, (int) $invite['account_id'], 'account_invitation', (string) $invite['public_id'], ['role' => $invite['role']], $requestId);
-            return (int) $invite['account_id'];
+            return ['account_id' => (int) $invite['account_id']];
         });
+        if (($result['denied'] ?? null) === 'email_mismatch') {
+            throw new AuthPublicException('team_invitation_email_mismatch', 'Sign in using the email address that received this invitation.', 403);
+        }
+        if (($result['denied'] ?? null) === 'expired') {
+            throw new AuthPublicException('team_invitation_invalid', 'The invitation is invalid or expired.', 404);
+        }
+        return (int) $result['account_id'];
     }
 
     public function revokeInvitation(int $accountId, int $actorUserId, string $publicId, string $requestId): void

@@ -55,7 +55,7 @@ final class AccountSecurityQueryService
         $inviteRows = [];
         if ($canManageTeam) {
             $invitations = $this->database->pdo()->prepare(
-                "SELECT public_id,invited_email,role,status,expires_at,created_at,updated_at
+                "SELECT public_id,invited_email,role,CASE WHEN status='pending' AND expires_at<=UTC_TIMESTAMP() THEN 'expired' ELSE status END AS status,expires_at,created_at,updated_at
                  FROM account_invitations WHERE account_id=:account
                  ORDER BY FIELD(status,'pending','accepted','revoked','expired'),created_at DESC,id DESC LIMIT 100"
             );

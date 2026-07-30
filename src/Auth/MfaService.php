@@ -81,7 +81,7 @@ final class MfaService
     /** @return array{recovery_codes:list<string>,enabled:bool} */
     public function confirmEnrollment(int $userId, string $code, string $requestId): array
     {
-        return $this->database->transaction(function (PDO $pdo) use ($userId, $code, $requestId): array {
+        $result = $this->database->transaction(function (PDO $pdo) use ($userId, $code, $requestId): array {
             $method = $this->method($pdo, $userId, true);
             if ($method === null || (string) $method['status'] !== 'pending') {
                 throw new AuthPublicException('mfa_enrollment_missing', 'Start MFA enrollment before confirming a code.', 409);
@@ -90,7 +90,7 @@ final class MfaService
             $counter = $this->matchingCounter($secret, $code, null);
             if ($counter === null) {
                 $this->receipt($pdo, null, $userId, $userId, 'mfa.enrollment_confirmed', 'denied', $requestId, ['reason' => 'invalid_code']);
-                throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or expired.', 422);
+                return ['denied' => 'invalid_code'];
             }
             $now = new DateTimeImmutable('now');
             $pdo->prepare(
@@ -109,6 +109,10 @@ final class MfaService
             $this->audit->record('auth.mfa.enabled', 'success', $userId, null, 'user', null, ['method' => 'totp'], $requestId);
             return ['recovery_codes' => $codes, 'enabled' => true];
         });
+        if (($result['denied'] ?? null) === 'invalid_code') {
+            throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or expired.', 422);
+        }
+        return $result;
     }
 
     public function disable(int $userId, string $password, string $requestId): void
@@ -176,7 +180,7 @@ final class MfaService
     /** @return array{id:int,public_id:string,email:string,display_name:string} */
     public function completeChallenge(string $token, string $code, string $ip, string $userAgent, string $requestId): array
     {
-        return $this->database->transaction(function (PDO $pdo) use ($token, $code, $ip, $userAgent, $requestId): array {
+        $result = $this->database->transaction(function (PDO $pdo) use ($token, $code, $ip, $userAgent, $requestId): array {
             $challenge = $pdo->prepare(
                 "SELECT c.*,u.public_id AS user_public_id,u.email,u.display_name,u.status AS user_status
                  FROM auth_mfa_challenges c JOIN users u ON u.id=c.user_id
@@ -221,14 +225,18 @@ final class MfaService
             }
             if (!$verified) {
                 $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, ['reason' => 'code_invalid']);
-                throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or already used.', 401);
+                return ['denied' => 'invalid_code'];
             }
             $pdo->prepare('UPDATE auth_mfa_challenges SET consumed_at=:now WHERE id=:id AND consumed_at IS NULL')
                 ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $row['id']]);
             $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'success', $requestId, []);
             $this->audit->record('auth.mfa.challenge_completed', 'success', $userId, null, 'user', (string) $row['user_public_id'], [], $requestId);
-            return ['id' => $userId, 'public_id' => (string) $row['user_public_id'], 'email' => (string) $row['email'], 'display_name' => (string) $row['display_name']];
+            return ['user' => ['id' => $userId, 'public_id' => (string) $row['user_public_id'], 'email' => (string) $row['email'], 'display_name' => (string) $row['display_name']]];
         });
+        if (($result['denied'] ?? null) === 'invalid_code') {
+            throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or already used.', 401);
+        }
+        return $result['user'];
     }
 
     /** @return array<string,mixed>|null */

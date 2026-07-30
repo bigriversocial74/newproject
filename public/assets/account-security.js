@@ -120,7 +120,10 @@
     });
   };
   const renderTeam = () => {
-    const section = document.getElementById('team-section'); section.hidden = !snapshot.can_manage_team;
+    const section = document.getElementById('team-section');
+    const inviteButton = document.getElementById('invite-member');
+    section.hidden = !snapshot.can_manage_team;
+    if (inviteButton) inviteButton.disabled = !snapshot.can_manage_team;
     if (!snapshot.can_manage_team) return;
     const members = document.getElementById('team-members'); clear(members);
     snapshot.members.forEach((member) => {
