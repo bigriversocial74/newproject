@@ -88,6 +88,8 @@ $assert(str_contains($client, 'body.account_id = accountId'), 'Control Center cl
 $assert(str_contains($client, 'body.csrf_token = csrfToken'), 'Control Center client does not force the current CSRF token after caller payload construction.');
 $assert(str_contains($client, '{ request: true, idempotency: true }'), 'Idempotent lifecycle actions do not carry request and idempotency identities.');
 $assert(str_contains($client, 'A suspension reason is required.'), 'Domain suspension can be submitted without a reason.');
+$assert(str_contains($client, '<progress class='), 'POD storage usage does not use a CSP-compatible progress element.');
+$assert(!str_contains($client, 'style='), 'Control Center client emits an inline style under a strict CSP.');
 $assert(!str_contains($client, 'localStorage') && !str_contains($client, 'sessionStorage'), 'Control Center persists account or lifecycle data in browser storage.');
 $assert(!str_contains($shellClient, 'localStorage') && !str_contains($shellClient, 'sessionStorage'), 'Shared shell persists account selection in browser storage.');
 $assert(!str_contains($fleetClient, 'localStorage') && !str_contains($fleetClient, 'sessionStorage'), 'HomeServer fleet persists one-time credentials in browser storage.');
