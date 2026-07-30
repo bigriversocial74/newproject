@@ -10,11 +10,8 @@
   const state = { snapshot: null, busy: false, notice: null, availabilityTimer: null };
 
   const escapeHtml = (value) => String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
   const humanize = (value) => String(value || "unknown").replaceAll("_", " ");
   const statusClass = (value) => humanize(value).replaceAll(" ", "-").toLowerCase();
   const formatDate = (value) => {
@@ -69,23 +66,14 @@
     root.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
   }
 
-  function metric(label, value, detailText = "") {
-    return `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detailText ? `<small>${escapeHtml(detailText)}</small>` : ""}</article>`;
-  }
-
-  function status(value) {
-    return `<span class="status ${escapeHtml(statusClass(value))}">${escapeHtml(humanize(value))}</span>`;
-  }
-
-  function detail(label, value) {
-    return `<div class="detail"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
-  }
-
-  function withAccount(path) {
+  const metric = (label, value, detailText = "") => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detailText ? `<small>${escapeHtml(detailText)}</small>` : ""}</article>`;
+  const status = (value) => `<span class="status ${escapeHtml(statusClass(value))}">${escapeHtml(humanize(value))}</span>`;
+  const detail = (label, value) => `<div class="detail"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+  const withAccount = (path) => {
     const url = new URL(path, window.location.origin);
     url.searchParams.set("account_id", String(accountId));
     return `${url.pathname}${url.search}${url.hash}`;
-  }
+  };
 
   function renderDashboard(data) {
     const m = data.metrics;
@@ -98,9 +86,8 @@
       metric("Attention", data.attention.length, "Across the selected account"),
     ].join("");
 
-    const attention = document.querySelector("#dashboard-attention");
     document.querySelector("#attention-count").textContent = String(data.attention.length);
-    attention.innerHTML = data.attention.length ? data.attention.map((item) => `
+    document.querySelector("#dashboard-attention").innerHTML = data.attention.length ? data.attention.map((item) => `
       <a class="attention ${escapeHtml(item.severity)}" href="${escapeHtml(withAccount(item.href))}">
         <span class="attention-bar"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.detail)}</small></span><em>${escapeHtml(humanize(item.type))}</em>
       </a>`).join("") : '<div class="empty">No active account attention items.</div>';
@@ -109,7 +96,7 @@
       ["Domains", `${m.domains_active}/${m.domains_total} active`, m.domains_attention, "/domains.php"],
       ["POD deployments", `${m.pods_active}/${m.pods_total} active`, m.pods_attention, "/pods.php"],
       ["HomeServers", `${m.homeservers_online}/${m.homeservers_total} online`, m.homeservers_attention, "/homeservers.php"],
-    ].map(([label, summary, needs, href]) => `<a class="card soft" href="${escapeHtml(withAccount(href))}" style="text-decoration:none;color:inherit"><div class="card-top"><div><h4>${escapeHtml(label)}</h4><p>${escapeHtml(summary)}</p></div>${needs ? status(`${needs} attention`) : status("healthy")}</div></a>`).join("");
+    ].map(([label, summary, needs, href]) => `<a class="card soft card-link" href="${escapeHtml(withAccount(href))}"><div class="card-top"><div><h4>${escapeHtml(label)}</h4><p>${escapeHtml(summary)}</p></div>${needs ? status(`${needs} attention`) : status("healthy")}</div></a>`).join("");
 
     document.querySelector("#dashboard-subscriptions").innerHTML = data.subscriptions.length ? data.subscriptions.map((subscription) => `
       <article class="card"><div class="card-top"><div><h4>${escapeHtml(subscription.plan.name)}</h4><p>${escapeHtml(formatMoney(subscription.plan.price_minor, subscription.plan.currency))} / ${escapeHtml(subscription.plan.billing_interval)}</p></div>${status(subscription.status)}</div>
@@ -127,8 +114,7 @@
     ].join("");
 
     const subscriptions = data.subscriptions.filter((item) => ["active", "trialing"].includes(item.status));
-    const select = document.querySelector("#domain-subscription");
-    select.innerHTML = '<option value="">Choose an active subscription</option>' + subscriptions.map((item) => `<option value="${item.id}">${escapeHtml(item.plan.name)} · ${escapeHtml(item.public_id)}</option>`).join("");
+    document.querySelector("#domain-subscription").innerHTML = '<option value="">Choose an active subscription</option>' + subscriptions.map((item) => `<option value="${item.id}">${escapeHtml(item.plan.name)} · ${escapeHtml(item.public_id)}</option>`).join("");
 
     document.querySelector("#domain-list").innerHTML = data.domains.length ? data.domains.map((domain) => {
       const actions = [];
@@ -150,8 +136,7 @@
     ].join("");
 
     const eligible = data.domains.filter((domain) => !domain.pod && domain.pod_license && ["active", "grace"].includes(domain.status) && ["active", "grace"].includes(domain.pod_license.status));
-    const select = document.querySelector("#pod-domain");
-    select.innerHTML = '<option value="">Choose an eligible Domain</option>' + eligible.map((domain) => `<option value="${escapeHtml(domain.public_id)}">${escapeHtml(domain.hostname)} · ${escapeHtml(domain.pod_license.public_id)}</option>`).join("");
+    document.querySelector("#pod-domain").innerHTML = '<option value="">Choose an eligible Domain</option>' + eligible.map((domain) => `<option value="${escapeHtml(domain.public_id)}">${escapeHtml(domain.hostname)} · ${escapeHtml(domain.pod_license.public_id)}</option>`).join("");
 
     document.querySelector("#pod-list").innerHTML = data.pods.length ? data.pods.map((pod) => {
       const job = pod.latest_job;
@@ -160,10 +145,11 @@
       if (job && job.status === "paused") actions.push(`<button class="button success" data-pod-action="resume" data-job="${escapeHtml(job.public_id)}">Resume Job</button>`);
       if (job && job.status === "failed") actions.push(`<button class="button warning" data-pod-action="retry" data-job="${escapeHtml(job.public_id)}">Retry Job</button>`);
       if (["active", "degraded", "failed", "suspended"].includes(pod.status)) actions.push(`<button class="button danger" data-pod-action="rollback" data-deployment="${escapeHtml(pod.public_id)}" data-hostname="${escapeHtml(pod.domain.hostname)}">Queue Rollback</button>`);
-      const usageClass = pod.storage_usage_percent >= 90 ? "progress danger" : "progress";
+      const percentage = Math.min(100, Math.max(0, Number(pod.storage_usage_percent)));
+      const progressClass = percentage >= 90 ? "storage-progress danger" : "storage-progress";
       return `<article class="card" id="${escapeHtml(pod.public_id)}"><div class="card-top"><div><h4>${escapeHtml(pod.domain.hostname)}</h4><p>${escapeHtml(pod.public_id)} · ${escapeHtml(pod.installed_version || "Installation pending")}</p></div>${status(pod.status)}</div>
         <div class="detail-grid">${detail("Routing", humanize(pod.routing_status))}${detail("SSL", humanize(pod.ssl_status))}${detail("Backup", humanize(pod.backup_status))}${detail("License", humanize(pod.license_status))}${detail("Update channel", pod.update_channel)}${detail("Heartbeat", formatDate(pod.last_heartbeat_at))}${detail("Latest job", job ? `${humanize(job.status)} · ${humanize(job.current_stage || job.job_type)}` : "No job")}${detail("Attempts", job ? job.attempts : 0)}</div>
-        <div><p class="subtle">Storage ${escapeHtml(formatBytes(pod.storage_usage_bytes))} of ${escapeHtml(formatBytes(pod.storage_allowance_bytes))} · ${escapeHtml(pod.storage_usage_percent)}%</p><div class="${usageClass}"><span style="width:${Math.min(100, Math.max(0, Number(pod.storage_usage_percent)))}%"></span></div></div>
+        <div><p class="subtle">Storage ${escapeHtml(formatBytes(pod.storage_usage_bytes))} of ${escapeHtml(formatBytes(pod.storage_allowance_bytes))} · ${escapeHtml(pod.storage_usage_percent)}%</p><progress class="${progressClass}" max="100" value="${percentage}">${percentage}%</progress></div>
         ${job?.last_error_code ? `<div class="notice danger section-space">Last worker error: ${escapeHtml(job.last_error_code)}</div>` : ""}
         <div class="actions section-space">${actions.join("")}</div></article>`;
     }).join("") : '<div class="empty">No POD deployments exist for this account.</div>';
@@ -260,14 +246,12 @@
 
     if (domainButton) {
       const action = domainButton.dataset.domainAction;
-      const domainPublicId = domainButton.dataset.domain;
-      const payload = { action, domain_public_id: domainPublicId };
+      const payload = { action, domain_public_id: domainButton.dataset.domain };
       if (action === "suspend") {
         const result = await modal(
           "Suspend Domain",
           '<p class="subtle">Suspension is non-destructive but disables the Domain and paired entitlements until repaired.</p><label class="form"><span>Reason</span><textarea id="modal-reason" maxlength="500" placeholder="Operational or billing reason"></textarea></label>',
-          "Suspend",
-          "warning",
+          "Suspend", "warning",
           (host) => {
             const reason = String(host.querySelector("#modal-reason")?.value || "").trim();
             if (!reason) throw new Error("A suspension reason is required.");
