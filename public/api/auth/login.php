@@ -17,10 +17,21 @@ try {
         (string) ($payload['email'] ?? ''),
         (string) ($payload['password'] ?? ''),
         $ip,
-        $userAgent
+        $userAgent,
+        true
     );
     if ($user === null) {
         JsonResponse::send(['error' => ['code' => 'invalid_credentials', 'message' => 'The email or password is incorrect.']], 401);
+    }
+
+    if ($container['mfa']->requiresMfa($user['id'])) {
+        $challenge = $container['mfa']->createChallenge($user['id'], $ip, $userAgent);
+        JsonResponse::send(['data' => [
+            'mfa_required' => true,
+            'challenge_token' => $challenge['challenge_token'],
+            'challenge_public_id' => $challenge['challenge_public_id'],
+            'expires_at' => $challenge['expires_at'],
+        ]], 202);
     }
 
     $existingToken = $container['session']->applicationToken();
@@ -37,8 +48,10 @@ try {
     $applicationSession = $container['database_sessions']->create($user['id'], $ip, $userAgent);
     $container['session']->setApplicationToken($applicationSession['token']);
     unset($applicationSession['token']);
+    $container['auth']->completeLogin($user['id'], $user['public_id']);
 
     JsonResponse::send(['data' => [
+        'mfa_required' => false,
         'user' => $user,
         'session' => $applicationSession,
         'csrf_token' => $container['session']->csrfToken(),
