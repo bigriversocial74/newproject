@@ -49,7 +49,7 @@ try {
         $pdo->prepare("INSERT INTO accounts (public_id,account_type,status,display_name,created_at,updated_at) VALUES (:public,'individual','active',:name,:now,:now)")
             ->execute(['public' => 'VP3-P15-' . strtoupper($token . '-' . $suffix), 'name' => 'Phase 15 ' . $suffix, 'now' => $now]);
         $accountId = (int) $pdo->lastInsertId();
-        $pdo->prepare("INSERT INTO account_users (account_id,user_id,role,status,created_at,updated_at) VALUES (:account,:user,'owner','active',:now,:now)")
+        $pdo->prepare("INSERT INTO account_users (account_id,user_id,role,status,created_at,updated_at) VALUES (:account,:user,'customer_owner','active',:now,:now)")
             ->execute(['account' => $accountId, 'user' => $userId, 'now' => $now]);
         $pdo->prepare("INSERT INTO subscriptions (public_id,account_id,plan_id,status,starts_at,current_period_starts_at,current_period_ends_at,created_at,updated_at) VALUES (:public,:account,:plan,'active',:now,:now,:ends,:now,:now)")
             ->execute(['public' => 'SUB-P15-' . strtoupper($token . '-' . $suffix), 'account' => $accountId, 'plan' => $planId, 'now' => $now, 'ends' => gmdate('Y-m-d H:i:s', time() + 2592000)]);
