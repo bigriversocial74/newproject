@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthenticationContext;
 use Vp3\Auth\AuthAuditService;
+use Vp3\Auth\AuthRuntimeConfigurationValidator;
 use Vp3\Auth\AuthSecretCipher;
 use Vp3\Auth\AuthService;
 use Vp3\Auth\DatabaseSessionService;
@@ -65,6 +66,8 @@ if ($usingExampleConfig) $configFile = __DIR__ . '/config/config-example.php';
 $config = require $configFile;
 $runtimeConfigurationValidator = new RuntimeConfigurationValidator();
 $runtimeConfigurationValidator->validate($config, $usingExampleConfig);
+$authRuntimeConfigurationValidator = new AuthRuntimeConfigurationValidator();
+$authRuntimeConfigurationValidator->validate($config, $usingExampleConfig);
 $environment = strtolower((string) $config['app']['env']);
 $queueLeaseSeconds = (int) $config['queue']['lease_seconds'];
 
@@ -155,6 +158,7 @@ $operations = new OperationsReadinessService($database, $operationalAudit, $oper
 return [
     'config' => $config,
     'runtime_configuration_validator' => $runtimeConfigurationValidator,
+    'auth_runtime_configuration_validator' => $authRuntimeConfigurationValidator,
     'database' => $database,
     'auth_audit' => $authAudit,
     'mail_adapter' => $mailAdapter,
