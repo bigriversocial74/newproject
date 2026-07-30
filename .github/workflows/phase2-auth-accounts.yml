@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/phase-15-federated-settings-shared-control-center
+  pull_request:
 
 permissions:
   contents: write
@@ -30,118 +31,118 @@ jobs:
           text = path.read_text()
 
           old = """        $snapshot = $this->buildSnapshot($accountId, $device);
-        $this->recordReceipt($accountId, $deviceId, 'WEB-' . strtoupper(bin2hex(random_bytes(10))), 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
-        return $snapshot;
-"""
+          $this->recordReceipt($accountId, $deviceId, 'WEB-' . strtoupper(bin2hex(random_bytes(10))), 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
+          return $snapshot;
+          """
           new = """        $snapshot = $this->buildSnapshot($accountId, $device);
-        $requestId = 'WEB-' . strtoupper(bin2hex(random_bytes(10)));
-        $requestHash = hash('sha256', $this->canonicalJson([
-            'setting_key' => $settingKey,
-            'value' => $validated,
-            'expected_revision' => $expectedRevision,
-            'device_public_id' => $devicePublicId,
-        ]));
-        $this->recordReceipt($accountId, $deviceId, $requestId, $requestHash, 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
-        return $snapshot;
-"""
+          $requestId = 'WEB-' . strtoupper(bin2hex(random_bytes(10)));
+          $requestHash = hash('sha256', $this->canonicalJson([
+              'setting_key' => $settingKey,
+              'value' => $validated,
+              'expected_revision' => $expectedRevision,
+              'device_public_id' => $devicePublicId,
+          ]));
+          $this->recordReceipt($accountId, $deviceId, $requestId, $requestHash, 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
+          return $snapshot;
+          """
           if old not in text:
               raise SystemExit('browser receipt anchor not found')
           text = text.replace(old, new, 1)
 
           old = """        $device = $this->authenticateDevice($devicePublicId, $credential);
-        $replayed = $this->database->pdo()->prepare(
-            'SELECT result,conflict_count FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
-        );
-        $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
-        if ($replayed->fetch(PDO::FETCH_ASSOC)) {
-            $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
-            $snapshot['replayed'] = true;
-            $snapshot['applied'] = [];
-            $snapshot['conflicts'] = [];
-            return $snapshot;
-        }
+          $replayed = $this->database->pdo()->prepare(
+              'SELECT result,conflict_count FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
+          );
+          $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
+          if ($replayed->fetch(PDO::FETCH_ASSOC)) {
+              $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
+              $snapshot['replayed'] = true;
+              $snapshot['applied'] = [];
+              $snapshot['conflicts'] = [];
+              return $snapshot;
+          }
 
-        if (count($updates) > 64) {
-            throw new RuntimeException('The settings sync contains too many updates.');
-        }
-"""
+          if (count($updates) > 64) {
+              throw new RuntimeException('The settings sync contains too many updates.');
+          }
+          """
           new = """        $device = $this->authenticateDevice($devicePublicId, $credential);
-        if (count($updates) > 64) {
-            throw new RuntimeException('The settings sync contains too many updates.');
-        }
-        $seenKeys = [];
-        foreach ($updates as $update) {
-            if (!is_array($update)) {
-                throw new RuntimeException('The settings sync update list is invalid.');
-            }
-            $key = trim((string) ($update['setting_key'] ?? ''));
-            if (isset($seenKeys[$key])) {
-                throw new RuntimeException('The settings sync contains a duplicate setting key.');
-            }
-            $seenKeys[$key] = true;
-        }
-        $requestHash = hash('sha256', $this->canonicalJson([
-            'device_public_id' => $devicePublicId,
-            'base_revision' => max(0, $baseRevision),
-            'updates' => $updates,
-        ]));
-        $replayed = $this->database->pdo()->prepare(
-            'SELECT request_hash FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
-        );
-        $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
-        $replayedReceipt = $replayed->fetch(PDO::FETCH_ASSOC);
-        if (is_array($replayedReceipt)) {
-            if (!hash_equals((string) $replayedReceipt['request_hash'], $requestHash)) {
-                throw new RuntimeException('The settings sync request ID was reused with a different payload.');
-            }
-            $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
-            $snapshot['replayed'] = true;
-            $snapshot['applied'] = [];
-            $snapshot['conflicts'] = [];
-            return $snapshot;
-        }
-"""
+          if (count($updates) > 64) {
+              throw new RuntimeException('The settings sync contains too many updates.');
+          }
+          $seenKeys = [];
+          foreach ($updates as $update) {
+              if (!is_array($update)) {
+                  throw new RuntimeException('The settings sync update list is invalid.');
+              }
+              $key = trim((string) ($update['setting_key'] ?? ''));
+              if (isset($seenKeys[$key])) {
+                  throw new RuntimeException('The settings sync contains a duplicate setting key.');
+              }
+              $seenKeys[$key] = true;
+          }
+          $requestHash = hash('sha256', $this->canonicalJson([
+              'device_public_id' => $devicePublicId,
+              'base_revision' => max(0, $baseRevision),
+              'updates' => $updates,
+          ]));
+          $replayed = $this->database->pdo()->prepare(
+              'SELECT request_hash FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
+          );
+          $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
+          $replayedReceipt = $replayed->fetch(PDO::FETCH_ASSOC);
+          if (is_array($replayedReceipt)) {
+              if (!hash_equals((string) $replayedReceipt['request_hash'], $requestHash)) {
+                  throw new RuntimeException('The settings sync request ID was reused with a different payload.');
+              }
+              $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
+              $snapshot['replayed'] = true;
+              $snapshot['applied'] = [];
+              $snapshot['conflicts'] = [];
+              return $snapshot;
+          }
+          """
           if old not in text:
               raise SystemExit('device replay anchor not found')
           text = text.replace(old, new, 1)
 
           old = """            $requestId,
-            'device_push',
-"""
+              'device_push',
+          """
           new = """            $requestId,
-            $requestHash,
-            'device_push',
-"""
+              $requestHash,
+              'device_push',
+          """
           if old not in text:
               raise SystemExit('device receipt call anchor not found')
           text = text.replace(old, new, 1)
 
           old = """        string $requestId,
-        string $direction,
-"""
+          string $direction,
+          """
           new = """        string $requestId,
-        string $requestHash,
-        string $direction,
-"""
+          string $requestHash,
+          string $direction,
+          """
           if old not in text:
               raise SystemExit('receipt signature anchor not found')
           text = text.replace(old, new, 1)
 
           old = """            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
-"""
+          """
           new = """            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,request_hash,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:request_hash,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
-"""
+          """
           if old not in text:
               raise SystemExit('receipt insert anchor not found')
           text = text.replace(old, new, 1)
 
           old = """            'request' => substr($requestId, 0, 64),
-            'direction' => $direction,
-"""
+              'direction' => $direction,
+          """
           new = """            'request' => substr($requestId, 0, 64),
-            'request_hash' => strtolower($requestHash),
-            'direction' => $direction,
-"""
+              'request_hash' => strtolower($requestHash),
+              'direction' => $direction,
+          """
           if old not in text:
               raise SystemExit('receipt parameters anchor not found')
           text = text.replace(old, new, 1)
