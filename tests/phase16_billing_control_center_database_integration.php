@@ -57,7 +57,7 @@ try {
 
     $pdo->prepare(
         "INSERT INTO plans (public_id,code,name,status,billing_interval,currency,price_minor,created_at,updated_at)
-         VALUES (:public,:code,'Phase 16 Billing Plan','active','monthly','USD',4900,:now,:now)"
+         VALUES (:public,:code,'Phase 16 Billing Plan','active','monthly','USD',4300,:now,:now)"
     )->execute(['public' => 'PLAN-P16-' . $upper, 'code' => 'phase16-' . $token, 'now' => $now]);
     $planId = (int) $pdo->lastInsertId();
     $pdo->prepare(
@@ -185,12 +185,14 @@ try {
     $assert($snapshot['metrics']['failed_payments'] === 1, 'Failed payment metric is incorrect.');
     $assert($snapshot['portal_available'] === true, 'Stripe portal eligibility was not detected.');
     $assert(count($snapshot['subscriptions']) === 1 && $snapshot['subscriptions'][0]['status'] === 'past_due', 'Subscription status is incorrect.');
+    $assert($snapshot['subscriptions'][0]['plan']['amount'] === 4900, 'Subscription view did not use the active Stripe price mapping.');
     $assert(count($snapshot['invoices']) === 1 && $snapshot['invoices'][0]['amount_remaining'] === 4900, 'Invoice data is incorrect.');
     $assert($snapshot['invoices'][0]['hosted_url'] === 'https://invoice.stripe.com/i/' . $token, 'Trusted hosted invoice URL was not retained.');
     $assert(count($snapshot['payments']) === 1 && $snapshot['payments'][0]['status'] === 'requires_payment_method', 'Payment failure data is incorrect.');
     $assert(count($snapshot['refunds']) === 1 && $snapshot['refunds'][0]['amount'] === 1200, 'Refund data is incorrect.');
     $planMatches = array_values(array_filter($snapshot['plans'], static fn (array $plan): bool => $plan['public_id'] === 'PLAN-P16-' . $upper));
     $assert(count($planMatches) === 1 && $planMatches[0]['available_for_checkout'] === true, 'Checkout-ready plan was not returned.');
+    $assert($planMatches[0]['amount'] === 4900, 'Plan view did not use the active Stripe price mapping.');
 
     $encoded = json_encode($snapshot, JSON_THROW_ON_ERROR);
     foreach (array_values($ownedExternal) as $externalId) {
