@@ -49,3 +49,5 @@ if ($failures !== []) {
 }
 
 echo "Phase 13 HomeServer cutover contract passed.\n";
+
+// Exact-head certification sync: signed transport path and bearer grant are permanent.
