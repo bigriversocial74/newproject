@@ -10,7 +10,7 @@ ControlCenterEndpoint::requireMethod('POST');
 
 try {
     $payload = ControlCenterEndpoint::payload();
-    $account = ControlCenterEndpoint::accountContext(
+    $account = ControlCenterEndpoint::accountContextForRoles(
         $container,
         $payload,
         ['customer_owner', 'customer_admin', 'billing_manager']
