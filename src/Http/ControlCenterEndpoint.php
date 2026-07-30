@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use JsonException;
 use Throwable;
 use Vp3\Auth\AuthPublicException;
+use Vp3\ControlCenter\PublicAccountIdentityResolver;
 
 final class ControlCenterEndpoint
 {
@@ -56,36 +57,25 @@ final class ControlCenterEndpoint
      */
     public static function accountContextForRoles(array $container, array $payload, array $allowedRoles): array
     {
-        $roles = self::roles($allowedRoles);
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
-        $requestedPublicId = self::accountPublicId($payload);
-        $placeholders = implode(',', array_fill(0, count($roles), '?'));
-        $sql = "SELECT au.account_id,au.role,a.public_id
-                FROM account_users au
-                JOIN accounts a ON a.id=au.account_id
-                WHERE au.user_id=? AND au.status='active' AND a.status='active'
-                  AND au.role IN ({$placeholders})";
-        $parameters = [(int) $current['user']['id'], ...$roles];
-        if ($requestedPublicId !== null) {
-            $sql .= ' AND a.public_id=?';
-            $parameters[] = $requestedPublicId;
-        }
-        $sql .= ' ORDER BY au.account_id LIMIT 1';
-        $statement = $container['database']->pdo()->prepare($sql);
-        $statement->execute($parameters);
-        $membership = $statement->fetch();
-        if (!is_array($membership) || (int) $membership['account_id'] < 1) {
+        if (array_key_exists('account_id', $payload)) {
             throw new AuthPublicException(
-                'account_membership_required',
-                'An active VP3 membership with permission for this action is required.',
-                403
+                'account_public_identity_required',
+                'Use the public VP3 account identity for Control Center requests.',
+                400
             );
         }
+        $resolver = new PublicAccountIdentityResolver($container['database']);
+        $resolved = $resolver->resolve(
+            (int) $current['user']['id'],
+            isset($payload['account_public_id']) ? (string) $payload['account_public_id'] : null,
+            $allowedRoles
+        );
         return [
-            'account_id' => (int) $membership['account_id'],
-            'account_public_id' => (string) $membership['public_id'],
-            'role' => (string) $membership['role'],
+            'account_id' => $resolved['account_id'],
+            'account_public_id' => $resolved['account_public_id'],
+            'role' => $resolved['role'],
             'user' => $current['user'],
             'session' => $current['session'],
         ];
@@ -123,39 +113,5 @@ final class ControlCenterEndpoint
             JsonResponse::send(['error' => ['code' => 'control_center_request_rejected', 'message' => $message]], $status);
         }
         JsonResponse::send(['error' => ['code' => 'control_center_request_failed', 'message' => 'Unable to complete the control center request.']], 500);
-    }
-
-    /** @param array<string,mixed> $payload */
-    private static function accountPublicId(array $payload): ?string
-    {
-        if (array_key_exists('account_id', $payload)) {
-            throw new AuthPublicException(
-                'account_public_identity_required',
-                'Use the public VP3 account identity for Control Center requests.',
-                400
-            );
-        }
-        $value = trim((string) ($payload['account_public_id'] ?? ''));
-        if ($value === '') {
-            return null;
-        }
-        if (!preg_match('/^[A-Za-z0-9._:-]{3,64}$/', $value)) {
-            throw new AuthPublicException('account_identity_invalid', 'The VP3 account identity is invalid.', 400);
-        }
-        return $value;
-    }
-
-    /** @param list<string> $roles @return list<string> */
-    private static function roles(array $roles): array
-    {
-        $allowed = ['customer_owner', 'customer_admin', 'billing_manager', 'support_member'];
-        $normalized = array_values(array_unique(array_filter(
-            array_map(static fn (mixed $role): string => trim((string) $role), $roles),
-            static fn (string $role): bool => in_array($role, $allowed, true)
-        )));
-        if ($normalized === []) {
-            throw new AuthPublicException('account_role_invalid', 'The account role policy is invalid.', 500);
-        }
-        return $normalized;
     }
 }
