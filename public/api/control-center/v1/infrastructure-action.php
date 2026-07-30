@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Vp3\Http\ControlCenterEndpoint;
 use Vp3\Http\JsonResponse;
 use Vp3\Infrastructure\InfrastructureControlCenterActionService;
+use Vp3\Infrastructure\InfrastructureControlCenterQueueService;
 
 $container = require __DIR__ . '/_bootstrap.php';
 ControlCenterEndpoint::requireMethod('POST');
@@ -20,6 +21,7 @@ try {
         $container['database'],
         $container['provider_secret_cipher']
     );
+    $queue = new InfrastructureControlCenterQueueService($container['database']);
     $action = strtolower(trim((string) ($payload['action'] ?? '')));
     $requestId = ControlCenterEndpoint::requestId($payload);
     $actorId = (int) $account['user']['id'];
@@ -53,7 +55,7 @@ try {
             $requestId,
             ControlCenterEndpoint::idempotencyKey($payload)
         ),
-        'reconcile', 'teardown' => $service->enqueueBindingOperation(
+        'reconcile', 'teardown' => $queue->enqueue(
             $account['account_id'],
             $actorId,
             $account['role'],
