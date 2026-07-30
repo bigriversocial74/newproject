@@ -1,0 +1,225 @@
+name: Phase 17 Security Hardening
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.event.pull_request.head.ref == 'feature/vp3-phase-17-account-team-security-control'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/vp3-phase-17-account-team-security-control
+          fetch-depth: 0
+      - name: Apply audited security repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected one anchor in {path}, found {text.count(old)}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'public/assets/account-security.js',
+              """  const renderTeam = () => {
+              const section = document.getElementById('team-section'); section.hidden = !snapshot.can_manage_team;
+              if (!snapshot.can_manage_team) return;
+          """,
+              """  const renderTeam = () => {
+              const section = document.getElementById('team-section');
+              const inviteButton = document.getElementById('invite-member');
+              section.hidden = !snapshot.can_manage_team;
+              if (inviteButton) inviteButton.disabled = !snapshot.can_manage_team;
+              if (!snapshot.can_manage_team) return;
+          """,
+          )
+
+          mfa = Path('src/Auth/MfaService.php')
+          text = mfa.read_text()
+          start = text.index('    /** @return array{recovery_codes:list<string>,enabled:bool} */\n    public function confirmEnrollment')
+          end = text.index('    public function disable', start)
+          confirm = '''    /** @return array{recovery_codes:list<string>,enabled:bool} */
+              public function confirmEnrollment(int $userId, string $code, string $requestId): array
+              {
+                  $result = $this->database->transaction(function (PDO $pdo) use ($userId, $code, $requestId): array {
+                      $method = $this->method($pdo, $userId, true);
+                      if ($method === null || (string) $method['status'] !== 'pending') {
+                          throw new AuthPublicException('mfa_enrollment_missing', 'Start MFA enrollment before confirming a code.', 409);
+                      }
+                      $secret = $this->decryptMethod($method, $userId);
+                      $counter = $this->matchingCounter($secret, $code, null);
+                      if ($counter === null) {
+                          $this->receipt($pdo, null, $userId, $userId, 'mfa.enrollment_confirmed', 'denied', $requestId, ['reason' => 'invalid_code']);
+                          return ['denied' => 'invalid_code'];
+                      }
+                      $now = new DateTimeImmutable('now');
+                      $pdo->prepare(
+                          "UPDATE auth_mfa_methods SET status='active',last_used_counter=:counter,activated_at=:now,disabled_at=NULL,updated_at=:now
+                           WHERE id=:id AND status='pending'"
+                      )->execute(['counter' => $counter, 'now' => $now->format('Y-m-d H:i:s'), 'id' => $method['id']]);
+                      $pdo->prepare('DELETE FROM auth_mfa_recovery_codes WHERE user_id=:user')->execute(['user' => $userId]);
+                      $codes = $this->newRecoveryCodes();
+                      $insert = $pdo->prepare(
+                          'INSERT INTO auth_mfa_recovery_codes (user_id,code_hash,used_at,created_at) VALUES (:user,:hash,NULL,:now)'
+                      );
+                      foreach ($codes as $recoveryCode) {
+                          $insert->execute(['user' => $userId, 'hash' => hash('sha256', $this->normalizeRecoveryCode($recoveryCode)), 'now' => $now->format('Y-m-d H:i:s')]);
+                      }
+                      $this->receipt($pdo, null, $userId, $userId, 'mfa.enrollment_confirmed', 'success', $requestId, ['recovery_code_count' => count($codes)]);
+                      $this->audit->record('auth.mfa.enabled', 'success', $userId, null, 'user', null, ['method' => 'totp'], $requestId);
+                      return ['recovery_codes' => $codes, 'enabled' => true];
+                  });
+                  if (($result['denied'] ?? null) === 'invalid_code') {
+                      throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or expired.', 422);
+                  }
+                  return $result;
+              }
+
+          '''
+          text = text[:start] + confirm + text[end:]
+          start = text.index('    /** @return array{id:int,public_id:string,email:string,display_name:string} */\n    public function completeChallenge')
+          end = text.index('    /** @return array<string,mixed>|null */', start)
+          complete = '''    /** @return array{id:int,public_id:string,email:string,display_name:string} */
+              public function completeChallenge(string $token, string $code, string $ip, string $userAgent, string $requestId): array
+              {
+                  $result = $this->database->transaction(function (PDO $pdo) use ($token, $code, $ip, $userAgent, $requestId): array {
+                      $challenge = $pdo->prepare(
+                          "SELECT c.*,u.public_id AS user_public_id,u.email,u.display_name,u.status AS user_status
+                           FROM auth_mfa_challenges c JOIN users u ON u.id=c.user_id
+                           WHERE c.token_hash=:token_hash LIMIT 1 FOR UPDATE"
+                      );
+                      $challenge->execute(['token_hash' => hash('sha256', trim($token))]);
+                      $row = $challenge->fetch(PDO::FETCH_ASSOC);
+                      $now = new DateTimeImmutable('now');
+                      if (!is_array($row) || $row['consumed_at'] !== null || $now >= new DateTimeImmutable((string) $row['expires_at'])
+                          || !hash_equals((string) $row['ip_hash'], hash('sha256', $ip))
+                          || !hash_equals((string) $row['user_agent_hash'], hash('sha256', $userAgent))
+                          || (string) $row['user_status'] !== 'active') {
+                          throw new AuthPublicException('mfa_challenge_invalid', 'The MFA challenge is invalid or expired.', 401);
+                      }
+                      $userId = (int) $row['user_id'];
+                      $method = $this->method($pdo, $userId, true);
+                      if ($method === null || (string) $method['status'] !== 'active') {
+                          throw new AuthPublicException('mfa_challenge_invalid', 'The MFA challenge is invalid or expired.', 401);
+                      }
+                      $verified = false;
+                      $normalizedRecovery = $this->normalizeRecoveryCode($code);
+                      if (preg_match('/^[A-Z0-9]{12}$/', $normalizedRecovery)) {
+                          $recovery = $pdo->prepare(
+                              'SELECT id FROM auth_mfa_recovery_codes WHERE user_id=:user AND code_hash=:hash AND used_at IS NULL LIMIT 1 FOR UPDATE'
+                          );
+                          $recovery->execute(['user' => $userId, 'hash' => hash('sha256', $normalizedRecovery)]);
+                          $recoveryId = (int) $recovery->fetchColumn();
+                          if ($recoveryId > 0) {
+                              $pdo->prepare('UPDATE auth_mfa_recovery_codes SET used_at=:now WHERE id=:id AND used_at IS NULL')
+                                  ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $recoveryId]);
+                              $verified = true;
+                          }
+                      } else {
+                          $secret = $this->decryptMethod($method, $userId);
+                          $lastCounter = $method['last_used_counter'] === null ? null : (int) $method['last_used_counter'];
+                          $counter = $this->matchingCounter($secret, $code, $lastCounter);
+                          if ($counter !== null) {
+                              $pdo->prepare('UPDATE auth_mfa_methods SET last_used_counter=:counter,updated_at=:now WHERE id=:id')
+                                  ->execute(['counter' => $counter, 'now' => $now->format('Y-m-d H:i:s'), 'id' => $method['id']]);
+                              $verified = true;
+                          }
+                      }
+                      if (!$verified) {
+                          $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, ['reason' => 'code_invalid']);
+                          return ['denied' => 'invalid_code'];
+                      }
+                      $pdo->prepare('UPDATE auth_mfa_challenges SET consumed_at=:now WHERE id=:id AND consumed_at IS NULL')
+                          ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $row['id']]);
+                      $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'success', $requestId, []);
+                      $this->audit->record('auth.mfa.challenge_completed', 'success', $userId, null, 'user', (string) $row['user_public_id'], [], $requestId);
+                      return ['user' => ['id' => $userId, 'public_id' => (string) $row['user_public_id'], 'email' => (string) $row['email'], 'display_name' => (string) $row['display_name']]];
+                  });
+                  if (($result['denied'] ?? null) === 'invalid_code') {
+                      throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or already used.', 401);
+                  }
+                  return $result['user'];
+              }
+
+          '''
+          mfa.write_text(text[:start] + complete + text[end:])
+
+          team = Path('src/Auth/TeamSecurityService.php')
+          text = team.read_text()
+          start = text.index('    public function acceptInvitation')
+          end = text.index('    public function revokeInvitation', start)
+          accept = '''    public function acceptInvitation(int $userId, string $userEmail, string $token, string $requestId): int
+              {
+                  $result = $this->database->transaction(function (PDO $pdo) use ($userId, $userEmail, $token, $requestId): array {
+                      $now = new DateTimeImmutable('now');
+                      $statement = $pdo->prepare('SELECT * FROM account_invitations WHERE token_hash=:hash LIMIT 1 FOR UPDATE');
+                      $statement->execute(['hash' => hash('sha256', trim($token))]);
+                      $invite = $statement->fetch(PDO::FETCH_ASSOC);
+                      if (!is_array($invite) || (string) $invite['status'] !== 'pending') {
+                          throw new AuthPublicException('team_invitation_invalid', 'The invitation is invalid or expired.', 404);
+                      }
+                      if ($now >= new DateTimeImmutable((string) $invite['expires_at'])) {
+                          $pdo->prepare("UPDATE account_invitations SET status='expired',updated_at=:now WHERE id=:id AND status='pending'")
+                              ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $invite['id']]);
+                          $this->receipt($pdo, (int) $invite['account_id'], $userId, $userId, 'team.invitation_accepted', 'denied', $requestId, ['reason' => 'expired']);
+                          return ['denied' => 'expired'];
+                      }
+                      if (!hash_equals((string) $invite['invited_email_normalized'], strtolower(trim($userEmail)))) {
+                          $this->receipt($pdo, (int) $invite['account_id'], $userId, $userId, 'team.invitation_accepted', 'denied', $requestId, ['reason' => 'email_mismatch']);
+                          return ['denied' => 'email_mismatch'];
+                      }
+                      $pdo->prepare(
+                          "INSERT INTO account_users (account_id,user_id,role,status,created_at,updated_at)
+                           VALUES (:account,:user,:role,'active',:now,:now)
+                           ON DUPLICATE KEY UPDATE role=VALUES(role),status='active',updated_at=VALUES(updated_at)"
+                      )->execute(['account' => $invite['account_id'], 'user' => $userId, 'role' => $invite['role'], 'now' => $now->format('Y-m-d H:i:s')]);
+                      $pdo->prepare(
+                          "UPDATE account_invitations SET status='accepted',accepted_by_user_id=:user,accepted_at=:now,updated_at=:now WHERE id=:id AND status='pending'"
+                      )->execute(['user' => $userId, 'now' => $now->format('Y-m-d H:i:s'), 'id' => $invite['id']]);
+                      $this->receipt($pdo, (int) $invite['account_id'], $userId, $userId, 'team.invitation_accepted', 'success', $requestId, ['invitation_public_id' => $invite['public_id'], 'role' => $invite['role']]);
+                      $this->audit->record('team.invitation_accepted', 'success', $userId, (int) $invite['account_id'], 'account_invitation', (string) $invite['public_id'], ['role' => $invite['role']], $requestId);
+                      return ['account_id' => (int) $invite['account_id']];
+                  });
+                  if (($result['denied'] ?? null) === 'email_mismatch') {
+                      throw new AuthPublicException('team_invitation_email_mismatch', 'Sign in using the email address that received this invitation.', 403);
+                  }
+                  if (($result['denied'] ?? null) === 'expired') {
+                      throw new AuthPublicException('team_invitation_invalid', 'The invitation is invalid or expired.', 404);
+                  }
+                  return (int) $result['account_id'];
+              }
+
+          '''
+          team.write_text(text[:start] + accept + text[end:])
+
+          for path in ['src/ControlCenter/AccountSecurityQueryService.php', 'src/Auth/TeamSecurityService.php']:
+              file = Path(path)
+              text = file.read_text()
+              text = text.replace(
+                  'SELECT public_id,invited_email,role,status,expires_at,created_at,updated_at',
+                  "SELECT public_id,invited_email,role,CASE WHEN status='pending' AND expires_at<=UTC_TIMESTAMP() THEN 'expired' ELSE status END AS status,expires_at,created_at,updated_at",
+              )
+              file.write_text(text)
+          PY
+          php -l src/Auth/MfaService.php
+          php -l src/Auth/TeamSecurityService.php
+          php -l src/ControlCenter/AccountSecurityQueryService.php
+          node --check public/assets/account-security.js
+          rm -f .github/workflows/phase17-security-hardening.yml
+          git config user.name "VP3 Phase 17 Hardening"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden Phase 17 MFA and invitation evidence"
+          git push origin HEAD:feature/vp3-phase-17-account-team-security-control
