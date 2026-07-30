@@ -1,22 +1,14 @@
 <?php
 
 declare(strict_types=1);
-
 $root = dirname(__DIR__);
 $failures = [];
-$assert = static function (bool $condition, string $message) use (&$failures): void {
-    if (!$condition) {
-        $failures[] = $message;
-    }
-};
+$assert = static function (bool $condition, string $message) use (&$failures): void { if (!$condition) $failures[] = $message; };
 $read = static function (string $path) use ($root): string {
     $content = file_get_contents($root . '/' . $path);
-    if ($content === false) {
-        throw new RuntimeException('Unable to read ' . $path);
-    }
+    if ($content === false) throw new RuntimeException('Unable to read ' . $path);
     return $content;
 };
-
 $service = $read('src/HomeServers/HomeServerFleetQueryService.php');
 $options = $read('src/HomeServers/HomeServerRegistrationOptionsService.php');
 $endpoint = $read('public/api/homeserver/v1/fleet.php');
@@ -26,6 +18,9 @@ $pageContext = $read('src/ControlCenter/AccountPageContext.php');
 $pageShell = $read('src/ControlCenter/ControlCenterPage.php');
 $client = $read('public/assets/homeserver-fleet.js');
 $transferClient = $read('public/assets/homeserver-transfer-accept.js');
+$registerEndpoint = $read('public/api/homeserver/v1/register.php');
+$transferEndpoint = $read('public/api/homeserver/v1/transfer-request.php');
+$acceptEndpoint = $read('public/api/homeserver/v1/transfer-accept.php');
 
 $assert(str_contains($endpoint, "HomeServerEndpoint::requireMethod('POST')"), 'Fleet endpoint is not POST-only.');
 $assert(str_contains($endpoint, 'HomeServerEndpoint::accountContext'), 'Fleet endpoint does not enforce authenticated account ownership and CSRF.');
@@ -42,26 +37,28 @@ $assert(str_contains($service, "'event_count_24h'"), 'Fleet response does not bo
 $assert(str_contains($options, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
 $assert(str_contains($options, 'hs.id IS NULL'), 'Eligible-license query does not require an unoccupied license.');
 $assert(str_contains($options, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
-$assert(str_contains($pageContext, "role IN ('customer_owner','customer_admin')"), 'Fleet page context does not require a customer owner or administrator role.');
+$assert(str_contains($pageContext, "'customer_owner', 'customer_admin'"), 'Fleet page context does not require owner/admin roles.');
 $assert(str_contains($pageShell, "header('Cache-Control: no-store')"), 'Shared fleet page shell does not disable response caching.');
-$assert(str_contains($pageShell, 'Content-Security-Policy'), 'Shared fleet page shell does not enforce a restrictive content security policy.');
+$assert(str_contains($pageShell, 'Content-Security-Policy'), 'Shared fleet page shell does not enforce a restrictive CSP.');
 $assert(str_contains($page, 'AccountPageContext::resolve'), 'Fleet page is not using the shared authenticated account context.');
-$assert(str_contains($page, "'homeservers'"), 'Fleet page is not registered in the shared control center navigation state.');
+$assert(str_contains($page, "'homeservers'"), 'Fleet page is not registered in navigation.');
+$assert(str_contains($page, 'data-account-public-id'), 'Fleet page does not expose the selected public account identity.');
+$assert(!str_contains($page, 'data-account-id='), 'Fleet page still exposes an internal account ID.');
 $assert(str_contains($client, '/api/homeserver/v1/register.php'), 'Fleet client cannot register a HomeServer.');
 $assert(str_contains($client, '/api/homeserver/v1/replace.php'), 'Fleet client cannot replace a HomeServer.');
 $assert(str_contains($client, '/api/homeserver/v1/transfer-request.php'), 'Fleet client cannot request a transfer.');
 $assert(str_contains($transferClient, '/api/homeserver/v1/transfer-accept.php'), 'Fleet client cannot accept a transfer.');
-$assert(str_contains($client, 'oneTimeBundle'), 'Registration and replacement credentials are not treated as one-time values.');
-$assert(str_contains($client, 'bundle.account_id'), 'Registration and replacement bundles are not bound to their issuing account.');
-$assert(str_contains($transferClient, 'bundleAccountId'), 'Transferred activation bundles are not bound to the destination account.');
-$assert(str_contains($transferClient, 'Transferred HomeServer activation bundle'), 'Transfer credentials are not presented through a one-time activation flow.');
-$assert(!str_contains($client, 'localStorage') && !str_contains($client, 'sessionStorage'), 'Fleet client persists one-time activation data in browser storage.');
-$assert(!str_contains($transferClient, 'localStorage') && !str_contains($transferClient, 'sessionStorage'), 'Transfer client persists one-time activation data in browser storage.');
+$assert(str_contains($client, 'oneTimeBundle'), 'Registration and replacement credentials are not one-time values.');
+$assert(str_contains($client, 'bundle.account_public_id'), 'Activation bundles are not bound to their issuing public account identity.');
+$assert(str_contains($transferClient, 'bundleAccountPublicId'), 'Transferred bundles are not bound to the destination public account identity.');
+$assert(str_contains($transferClient, 'Transferred HomeServer activation bundle'), 'Transfer credentials lack a one-time activation flow.');
+$assert(str_contains($registerEndpoint, "unset(\$result['device_id'])") && str_contains($registerEndpoint, "'account_public_id'"), 'Registration response exposes an internal device/account identity.');
+$assert(str_contains($acceptEndpoint, "unset(\$result['license_id'])") && str_contains($acceptEndpoint, "'account_public_id'"), 'Transfer acceptance response exposes internal identity.');
+$assert(str_contains($transferEndpoint, 'target_account_public_id') && !str_contains($transferEndpoint, "payload['target_account_id']"), 'Transfer target still uses a numeric account identity.');
+$assert(!str_contains($client, 'account_id') && !str_contains($transferClient, 'account_id'), 'Fleet browser code still carries numeric account identity fields.');
+$assert(!str_contains($client, 'localStorage') && !str_contains($client, 'sessionStorage'), 'Fleet client persists one-time activation data.');
+$assert(!str_contains($transferClient, 'localStorage') && !str_contains($transferClient, 'sessionStorage'), 'Transfer client persists one-time activation data.');
 $assert(!str_contains($page, '$exception->getMessage()'), 'Fleet authentication page leaks internal exception messages.');
 
-if ($failures !== []) {
-    fwrite(STDERR, implode("\n", $failures) . "\n");
-    exit(1);
-}
-
+if ($failures !== []) { fwrite(STDERR, implode("\n", $failures) . "\n"); exit(1); }
 echo "Phase 14 HomeServer fleet contract passed.\n";
