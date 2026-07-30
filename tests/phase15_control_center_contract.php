@@ -11,6 +11,7 @@ $read = static function (string $path) use ($root): string {
 };
 
 $context = $read('src/ControlCenter/AccountPageContext.php');
+$resolver = $read('src/ControlCenter/PublicAccountIdentityResolver.php');
 $shell = $read('src/ControlCenter/ControlCenterPage.php');
 $query = $read('src/ControlCenter/AccountControlCenterQueryService.php');
 $endpoint = $read('src/Http/ControlCenterEndpoint.php');
@@ -30,10 +31,10 @@ $transferClient = $read('public/assets/homeserver-transfer-accept.js');
 $styles = $read('public/assets/control-center.css');
 
 $assert(str_contains($context, "'customer_owner', 'customer_admin'"), 'Shared account context does not retain owner/admin roles.');
-$assert(str_contains($context, "a.status='active'"), 'Shared account context does not require an active account.');
+$assert(str_contains($resolver, "a.status='active'") && str_contains($resolver, "au.status='active'"), 'Shared account context does not require active account and membership state.');
 $assert(str_contains($context, 'AuthPublicException'), 'Account membership failure is not a public access error.');
 $assert(str_contains($context, "\$_GET['account']"), 'Shared account context does not route by public account identity.');
-$assert(str_contains($context, 'hash_equals((string) $account[\'public_id\'], $requested)'), 'Page routing does not compare public account identities safely.');
+$assert(str_contains($resolver, "hash_equals((string) \$membership['public_id'], \$requestedPublicId)"), 'Page routing does not compare public account identities safely.');
 $assert(str_contains($shell, "'dashboard' => ['/dashboard.php'"), 'Shared shell does not expose Dashboard.');
 $assert(str_contains($shell, "'domains' => ['/domains.php'"), 'Shared shell does not expose Domains.');
 $assert(str_contains($shell, "'pods' => ['/pods.php'"), 'Shared shell does not expose PODs.');
@@ -55,7 +56,8 @@ foreach ([$overview, $domainAction, $podAction] as $apiFile) {
 $assert(str_contains($endpoint, 'MAX_JSON_BYTES = 65536'), 'Control Center JSON requests are not bounded.');
 $assert(str_contains($endpoint, 'account_public_id'), 'Control Center API does not resolve public account identities.');
 $assert(str_contains($endpoint, "array_key_exists('account_id', \$payload)"), 'Control Center API does not reject legacy numeric account payloads.');
-$assert(str_contains($endpoint, "JOIN accounts a ON a.id=au.account_id"), 'Control Center API does not resolve public identity server-side.');
+$assert(str_contains($endpoint, 'new PublicAccountIdentityResolver'), 'Control Center API bypasses the shared public account resolver.');
+$assert(str_contains($resolver, "JOIN accounts a ON a.id=au.account_id"), 'Control Center API does not resolve public identity server-side.');
 $assert(str_contains($endpoint, 'InvalidArgumentException'), 'Control Center API lacks stable validation errors.');
 
 $assert(str_contains($query, 'WHERE s.account_id=:account'), 'Subscription query is not account scoped.');
@@ -98,7 +100,8 @@ $assert(str_contains($client, 'A suspension reason is required.'), 'Domain suspe
 $assert(str_contains($client, '<progress class='), 'POD storage usage lacks CSP-compatible progress.');
 $assert(!str_contains($client, 'style='), 'Control Center client emits inline style.');
 $assert(str_contains($shellClient, 'url.searchParams.set("account", picker.value)'), 'Account switcher does not use public routing.');
-$assert(!str_contains($shellClient, 'account_id'), 'Account switcher retains numeric routing.');
+$assert(!str_contains($shellClient, 'url.searchParams.set("account_id"') && !str_contains($shellClient, 'url.searchParams.set("account_public_id"'), 'Account switcher actively emits a legacy account route.');
+$assert(str_contains($shellClient, 'url.searchParams.delete("account_id")'), 'Account switcher does not remove legacy numeric account routing.');
 foreach ([$client, $shellClient, $fleetClient, $transferClient] as $browserFile) {
     $assert(!str_contains($browserFile, 'localStorage') && !str_contains($browserFile, 'sessionStorage'), 'Control Center persists sensitive browser state.');
 }
