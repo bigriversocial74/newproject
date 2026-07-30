@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Vp3\Auth\TeamInvitationRevocationService;
 use Vp3\Http\ControlCenterEndpoint;
 use Vp3\Http\JsonResponse;
 
@@ -25,13 +26,21 @@ try {
         default => throw new RuntimeException('The requested team action is not supported.'),
     };
     $replay = $container['database']->pdo()->prepare(
-        'SELECT public_id FROM account_security_receipts
-         WHERE account_id=:account AND action=:action AND request_id=:request AND result=\'success\' LIMIT 1'
+        "SELECT public_id FROM account_security_receipts
+         WHERE account_id=:account AND action=:action AND request_id=:request AND result='success' LIMIT 1"
     );
-    $replay->execute(['account' => $account['account_id'], 'action' => $event, 'request' => $requestId]);
+    $replay->execute([
+        'account' => $account['account_id'],
+        'action' => $event,
+        'request' => $requestId,
+    ]);
     $receipt = $replay->fetchColumn();
     if (is_string($receipt) && $receipt !== '') {
-        JsonResponse::send(['data' => ['status' => 'already_completed', 'replayed' => true, 'receipt_public_id' => $receipt]]);
+        JsonResponse::send(['data' => [
+            'status' => 'already_completed',
+            'replayed' => true,
+            'receipt_public_id' => $receipt,
+        ]]);
     }
 
     $service = $container['team_security'];
@@ -47,9 +56,14 @@ try {
         JsonResponse::send(['data' => array_merge($result, ['replayed' => false])], 201);
     }
     if ($action === 'revoke_invitation') {
-        $service->revokeInvitation(
+        $revocation = new TeamInvitationRevocationService(
+            $container['database'],
+            $container['auth_audit']
+        );
+        $revocation->revoke(
             $account['account_id'],
             (int) $account['user']['id'],
+            $account['role'],
             (string) ($payload['invitation_public_id'] ?? ''),
             $requestId
         );
