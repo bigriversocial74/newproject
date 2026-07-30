@@ -1,0 +1,60 @@
+name: Phase 11C Production Artifacts
+
+on:
+  push:
+    branches:
+      - feature/vp3-phase-11c-production-adapters
+  pull_request:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: json, zip
+          coverage: none
+      - id: build
+        continue-on-error: true
+        run: |
+          php -l scripts/build-production-artifacts.php
+          php scripts/build-production-artifacts.php
+          test -s dist/vp3-production.zip
+          test -s dist/vp3-production.sql
+          test -s dist/SHA256SUMS.txt
+          test -s dist/artifact-manifest.json
+          grep -q 'CREATE TABLE IF NOT EXISTS accounts' dist/vp3-production.sql
+          grep -q 'CREATE TABLE IF NOT EXISTS update_receipts' dist/vp3-production.sql
+          unzip -t dist/vp3-production.zip
+          ! unzip -Z1 dist/vp3-production.zip | grep -E '(^|/)(config/config\.php|\.env|tests/|\.git/)'
+      - name: Upload production artifacts
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vp3-production
+          path: |
+            dist/vp3-production.zip
+            dist/vp3-production.sql
+            dist/SHA256SUMS.txt
+            dist/artifact-manifest.json
+            dist/DEPLOYMENT.md
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish production artifact status
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.build.outcome }}
+        run: bash .github/scripts/publish-commit-status.sh "phase11c/artifacts" "$OUTCOME" "Phase 11C production ZIP and SQL"
+      - name: Enforce production artifact build
+        if: always()
+        env:
+          OUTCOME: ${{ steps.build.outcome }}
+        run: '[[ "$OUTCOME" == success ]]'
