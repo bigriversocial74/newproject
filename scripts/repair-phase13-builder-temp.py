@@ -23,11 +23,11 @@ catalog = replace_once(
 '''
 new = '''release_sql_pattern = re.compile(
     r"(?P<indent>\\s*)\\(public_id,product_id,version,channel,status,release_notes_hash,emergency_override,created_at,updated_at\\)\\n"
-    r"(?P<values>\\s*)VALUES \\(:public,:product,:version,:channel,'draft',:notes,:emergency,UTC_TIMESTAMP\\(\\),UTC_TIMESTAMP\\(\\)\\)"
+    r"(?P<values>\\s*)VALUES \\(:public,:product,:version,:channel,\\\\'draft\\\\',:notes,:emergency,UTC_TIMESTAMP\\(\\),UTC_TIMESTAMP\\(\\)\\)"
 )
 catalog, count = release_sql_pattern.subn(
     r"\\g<indent>(public_id,product_id,version,channel,status,release_notes_hash,release_notes,emergency_override,created_at,updated_at)\\n"
-    r"\\g<values>VALUES (:public,:product,:version,:channel,'draft',:notes_hash,:release_notes,:emergency,UTC_TIMESTAMP(),UTC_TIMESTAMP())",
+    r"\\g<values>VALUES (:public,:product,:version,:channel,\\'draft\\',:notes_hash,:release_notes,:emergency,UTC_TIMESTAMP(),UTC_TIMESTAMP())",
     catalog,
     count=1,
 )
