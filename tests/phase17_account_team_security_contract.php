@@ -10,6 +10,7 @@ $required = [
     'src/Auth/AuthSecretCipher.php',
     'src/Auth/MfaService.php',
     'src/Auth/TeamSecurityService.php',
+    'src/Auth/TeamInvitationRevocationService.php',
     'src/ControlCenter/AccountSecurityQueryService.php',
     'public/account-security.php',
     'public/team-invite.php',
@@ -20,6 +21,7 @@ $required = [
     'public/api/control-center/v1/team-action.php',
     'public/assets/account-security.js',
     'public/assets/account-security.css',
+    'tests/phase17_invitation_revocation_database_integration.php',
 ];
 foreach ($required as $path) {
     if (!is_file($root . '/' . $path)) {
@@ -34,8 +36,10 @@ $runtime = $read('src/Auth/AuthRuntimeConfigurationValidator.php');
 $auth = $read('src/Auth/AuthService.php');
 $mfa = $read('src/Auth/MfaService.php');
 $team = $read('src/Auth/TeamSecurityService.php');
+$revocation = $read('src/Auth/TeamInvitationRevocationService.php');
 $query = $read('src/ControlCenter/AccountSecurityQueryService.php');
 $login = $read('public/api/auth/login.php');
+$teamEndpoint = $read('public/api/control-center/v1/team-action.php');
 $pageContext = $read('src/ControlCenter/AccountPageContext.php');
 $apiContext = $read('src/Http/ControlCenterEndpoint.php');
 $shell = $read('src/ControlCenter/ControlCenterPage.php');
@@ -43,6 +47,7 @@ $page = $read('public/account-security.php');
 $invitePage = $read('public/team-invite.php');
 $client = $read('public/assets/account-security.js');
 $databaseTest = $read('tests/phase17_account_team_security_database_integration.php');
+$revocationTest = $read('tests/phase17_invitation_revocation_database_integration.php');
 
 $assert = static function (bool $condition, string $message) use (&$failures): void {
     if (!$condition) {
@@ -86,6 +91,12 @@ $assert(str_contains($team, 'private function assertActor') && str_contains($tea
 $assert(str_contains($team, "UPDATE auth_sessions") && str_contains($team, "'membership_' . \$status") && str_contains($team, 'revocation_reason=:reason'), 'Membership suspension/removal does not revoke sessions safely.');
 $assert(str_contains($query, '$canManageTeam') && str_contains($query, 'AND au.user_id=:current_user'), 'Non-manager team data is not isolated to the current user.');
 
+$assert(str_contains($revocation, "status='active'") && str_contains($revocation, 'LIMIT 1 FOR UPDATE'), 'Invitation revocation does not lock and revalidate the active actor membership.');
+$assert(str_contains($revocation, '!hash_equals($storedRole, $actorRole)') && str_contains($revocation, 'actor_membership_changed'), 'Invitation revocation trusts a stale caller role.');
+$assert(str_contains($revocation, "status='pending'") && str_contains($revocation, 'expires_at>UTC_TIMESTAMP()'), 'Invitation revocation can mutate non-pending or expired invitations.');
+$assert(str_contains($revocation, "'team.invitation_revoked'") && str_contains($revocation, "'denied'"), 'Invitation revocation denial evidence is incomplete.');
+$assert(str_contains($teamEndpoint, 'new TeamInvitationRevocationService') && str_contains($teamEndpoint, '$account[\'role\']'), 'Team endpoint does not use transactional invitation revocation authorization.');
+
 $assert(str_contains($client, 'inviteButton.disabled = !snapshot.can_manage_team'), 'Invite button is not enabled from the authorized overview state.');
 foreach (['localStorage', 'sessionStorage', '.innerHTML', 'eval('] as $forbidden) {
     $assert(!str_contains($client, $forbidden), 'Account Security client contains forbidden browser behavior: ' . $forbidden);
@@ -94,7 +105,10 @@ $assert(!str_contains($page, '<script>') && !str_contains($page, '<style') && !s
 $assert(str_contains($invitePage, "form-action 'self'") && str_contains($invitePage, 'assertCsrf'), 'Invitation acceptance page is missing CSP or CSRF enforcement.');
 $assert(str_contains($page, 'resolveForRoles') && str_contains($page, "'support_member'"), 'Account Security page does not admit all current customer roles.');
 $assert(str_contains($databaseTest, 'PDO::ATTR_EMULATE_PREPARES => false'), 'Phase 17 database certification does not use native PDO prepares.');
-$assert(!is_file($root . '/.github/workflows/phase17-test-correction.yml'), 'Temporary self-modifying Phase 17 workflow remains in the branch.');
+$assert(str_contains($revocationTest, 'PDO::ATTR_EMULATE_PREPARES => false'), 'Invitation revocation certification does not use native PDO prepares.');
+foreach (['phase17-test-correction.yml', 'phase17-database-proof-repair.yml', 'phase17-revoke-actor-hardening.yml'] as $temporaryWorkflow) {
+    $assert(!is_file($root . '/.github/workflows/' . $temporaryWorkflow), 'Temporary self-modifying workflow remains: ' . $temporaryWorkflow);
+}
 
 if ($failures !== []) {
     fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL);
