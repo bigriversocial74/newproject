@@ -36,6 +36,7 @@ $styles = $read('public/assets/control-center.css');
 
 $assert(str_contains($context, "role IN ('owner','administrator')"), 'Shared account context does not require an owner or administrator role.');
 $assert(str_contains($context, "a.status='active'"), 'Shared account context does not require an active account.');
+$assert(str_contains($context, 'AuthPublicException'), 'Account membership failure is not represented as a public access error.');
 $assert(str_contains($shell, "'dashboard' => ['/dashboard.php'"), 'Shared shell does not expose the Dashboard route.');
 $assert(str_contains($shell, "'domains' => ['/domains.php'"), 'Shared shell does not expose the Domains route.');
 $assert(str_contains($shell, "'pods' => ['/pods.php'"), 'Shared shell does not expose the POD route.');
@@ -76,6 +77,8 @@ $assert(!str_contains($podAction, 'processNext('), 'POD worker execution occurs 
 foreach ([$dashboard, $domains, $pods, $homeservers] as $pageFile) {
     $assert(str_contains($pageFile, 'AccountPageContext::resolve'), 'A Control Center page bypasses the shared authenticated account context.');
     $assert(str_contains($pageFile, 'ControlCenterPage::renderStart'), 'A Control Center page bypasses the shared shell.');
+    $assert(str_contains($pageFile, 'catch (AuthPublicException)'), 'A Control Center page masks operational failures as sign-in failures.');
+    $assert(!str_contains($pageFile, 'catch (Throwable)'), 'A Control Center page catches every operational failure as an access failure.');
     $assert(!str_contains($pageFile, '$exception->getMessage()'), 'A Control Center page leaks authentication exception details.');
 }
 $assert(str_contains($dashboard, 'dashboard-attention'), 'Dashboard omits prioritized attention items.');
