@@ -20,7 +20,6 @@ ControlCenterPage::renderStart(
 );
 $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 ?>
-<link rel="stylesheet" href="/assets/billing-control-center.css">
 <section class="hero billing-hero">
   <div><span class="eyebrow">Account billing control</span><h2><?= $escape($context['selected']['display_name']) ?></h2><p>Review plan access, renewal state, invoices, payment outcomes, and refunds without exposing payment credentials or Stripe identifiers.</p></div>
   <div class="hero-actions"><button class="button light" id="refresh-billing" type="button">Refresh Billing</button><button class="button primary" id="open-billing-portal" type="button">Manage Payment Method</button></div>
