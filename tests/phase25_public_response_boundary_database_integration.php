@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use Vp3\Auth\AuthAuditService;
+use Vp3\Auth\AuthSecretCipher;
+use Vp3\Auth\MfaService;
 use Vp3\ControlCenter\AccountBillingQueryService;
 use Vp3\ControlCenter\AccountControlCenterQueryService;
 use Vp3\ControlCenter\AccountSecurityQueryService;
@@ -105,7 +108,10 @@ try {
 
     $rawDashboard = (new AccountControlCenterQueryService($database))->snapshot($accountId);
     $rawBilling = (new AccountBillingQueryService($database))->snapshot($accountId);
-    $rawSecurity = (new AccountSecurityQueryService($database))->snapshot($accountId, $userId, 'customer_owner');
+    $audit = new AuthAuditService($database);
+    $cipher = new AuthSecretCipher(base64_encode(random_bytes(32)), 'phase25-test-key');
+    $mfa = new MfaService($database, $cipher, $audit, 300, 8);
+    $rawSecurity = (new AccountSecurityQueryService($database, $mfa))->snapshot($accountId, $userId, 'customer_owner', 'SESSION-P25-' . $token);
     $rawFleet = (new HomeServerFleetQueryService($database))->snapshot($accountId);
 
     $assert(isset($rawDashboard['account']['id'], $rawDashboard['subscriptions'][0]['id']), 'Dashboard fixture did not exercise internal identifiers.');
