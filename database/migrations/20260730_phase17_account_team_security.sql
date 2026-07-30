@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS auth_mfa_challenges (
     token_hash CHAR(64) NOT NULL,
     ip_hash CHAR(64) NOT NULL,
     user_agent_hash CHAR(64) NOT NULL,
+    attempt_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    max_attempts SMALLINT UNSIGNED NOT NULL DEFAULT 6,
     expires_at DATETIME NOT NULL,
     consumed_at DATETIME NULL,
     created_at DATETIME NOT NULL,
