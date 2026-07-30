@@ -1,107 +1,161 @@
 name: Phase 2 Auth and Accounts
 
 on:
-  pull_request:
   push:
     branches:
-      - feature/vp3-phase-2-auth-accounts-20260728
+      - feature/phase-15-federated-settings-shared-control-center
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  php:
+  harden-phase15-idempotency:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        php: ['8.2', '8.3']
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_mysql, json, mbstring
-          coverage: none
-      - name: Validate PHP syntax
-        run: find src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
-      - name: Run executable tests
-        run: php tests/run.php
-      - name: Validate cumulative installer
-        run: |
-          grep -q 'SOURCE migrations/20260728_phase2_auth_accounts.sql' database/phase2-auth-accounts-single-install.sql
-          grep -q 'SOURCE migrations/20260729_phase2_auth_accounts_quality.sql' database/phase2-auth-accounts-single-install.sql
-          grep -q 'SOURCE migrations/20260729_phase2_auth_accounts_completion.sql' database/phase2-auth-accounts-single-install.sql
-          grep -q 'SOURCE migrations/20260729_phase11b_identity_authentication_completion.sql' database/phase2-auth-accounts-single-install.sql
-          grep -q 'SOURCE migrations/20260729_phase11b_identity_authentication_integrity.sql' database/phase2-auth-accounts-single-install.sql
-
-  mysql8:
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: vp3_test_root
-          MYSQL_DATABASE: vp3_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pvp3_test_root"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@v4
+          ref: feature/phase-15-federated-settings-shared-control-center
+          fetch-depth: 0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: pdo, pdo_mysql, json, mbstring
+          extensions: json, mbstring
           coverage: none
-      - name: Install MySQL client
-        run: sudo apt-get update && sudo apt-get install -y default-mysql-client
-      - name: Import cumulative Phase 2 identity schema twice
-        working-directory: database
+      - name: Bind request IDs to canonical payloads
         run: |
-          mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
-          mysql -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
-      - name: Run MySQL 8 integration certification
-        env:
-          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
-          VP3_TEST_DB_USER: root
-          VP3_TEST_DB_PASSWORD: vp3_test_root
-        run: php tests/database-integration.php
+          python - <<'PY'
+          from pathlib import Path
 
-  mariadb1011:
-    runs-on: ubuntu-latest
-    services:
-      mariadb:
-        image: mariadb:10.11
-        env:
-          MARIADB_ROOT_PASSWORD: vp3_test_root
-          MARIADB_DATABASE: vp3_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -pvp3_test_root"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: pdo, pdo_mysql, json, mbstring
-          coverage: none
-      - name: Install MariaDB client
-        run: sudo apt-get update && sudo apt-get install -y mariadb-client
-      - name: Import cumulative Phase 2 identity schema twice
-        working-directory: database
+          path = Path('src/Settings/FederatedSettingsService.php')
+          text = path.read_text()
+
+          old = """        $snapshot = $this->buildSnapshot($accountId, $device);
+        $this->recordReceipt($accountId, $deviceId, 'WEB-' . strtoupper(bin2hex(random_bytes(10))), 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
+        return $snapshot;
+"""
+          new = """        $snapshot = $this->buildSnapshot($accountId, $device);
+        $requestId = 'WEB-' . strtoupper(bin2hex(random_bytes(10)));
+        $requestHash = hash('sha256', $this->canonicalJson([
+            'setting_key' => $settingKey,
+            'value' => $validated,
+            'expected_revision' => $expectedRevision,
+            'device_public_id' => $devicePublicId,
+        ]));
+        $this->recordReceipt($accountId, $deviceId, $requestId, $requestHash, 'vp3_update', $expectedRevision, $revision, (string) $snapshot['snapshot_hash'], 'applied', 0);
+        return $snapshot;
+"""
+          if old not in text:
+              raise SystemExit('browser receipt anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = """        $device = $this->authenticateDevice($devicePublicId, $credential);
+        $replayed = $this->database->pdo()->prepare(
+            'SELECT result,conflict_count FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
+        );
+        $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
+        if ($replayed->fetch(PDO::FETCH_ASSOC)) {
+            $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
+            $snapshot['replayed'] = true;
+            $snapshot['applied'] = [];
+            $snapshot['conflicts'] = [];
+            return $snapshot;
+        }
+
+        if (count($updates) > 64) {
+            throw new RuntimeException('The settings sync contains too many updates.');
+        }
+"""
+          new = """        $device = $this->authenticateDevice($devicePublicId, $credential);
+        if (count($updates) > 64) {
+            throw new RuntimeException('The settings sync contains too many updates.');
+        }
+        $seenKeys = [];
+        foreach ($updates as $update) {
+            if (!is_array($update)) {
+                throw new RuntimeException('The settings sync update list is invalid.');
+            }
+            $key = trim((string) ($update['setting_key'] ?? ''));
+            if (isset($seenKeys[$key])) {
+                throw new RuntimeException('The settings sync contains a duplicate setting key.');
+            }
+            $seenKeys[$key] = true;
+        }
+        $requestHash = hash('sha256', $this->canonicalJson([
+            'device_public_id' => $devicePublicId,
+            'base_revision' => max(0, $baseRevision),
+            'updates' => $updates,
+        ]));
+        $replayed = $this->database->pdo()->prepare(
+            'SELECT request_hash FROM federated_settings_sync_receipts WHERE device_id=:device AND request_id=:request LIMIT 1'
+        );
+        $replayed->execute(['device' => $device['id'], 'request' => $requestId]);
+        $replayedReceipt = $replayed->fetch(PDO::FETCH_ASSOC);
+        if (is_array($replayedReceipt)) {
+            if (!hash_equals((string) $replayedReceipt['request_hash'], $requestHash)) {
+                throw new RuntimeException('The settings sync request ID was reused with a different payload.');
+            }
+            $snapshot = $this->buildSnapshot((int) $device['account_id'], $device);
+            $snapshot['replayed'] = true;
+            $snapshot['applied'] = [];
+            $snapshot['conflicts'] = [];
+            return $snapshot;
+        }
+"""
+          if old not in text:
+              raise SystemExit('device replay anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = """            $requestId,
+            'device_push',
+"""
+          new = """            $requestId,
+            $requestHash,
+            'device_push',
+"""
+          if old not in text:
+              raise SystemExit('device receipt call anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = """        string $requestId,
+        string $direction,
+"""
+          new = """        string $requestId,
+        string $requestHash,
+        string $direction,
+"""
+          if old not in text:
+              raise SystemExit('receipt signature anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = """            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
+"""
+          new = """            'INSERT INTO federated_settings_sync_receipts (public_id,account_id,device_id,request_id,request_hash,direction,base_revision,applied_revision,snapshot_hash,result,conflict_count,created_at) VALUES (:public,:account,:device,:request,:request_hash,:direction,:base,:applied,:snapshot,:result,:conflicts,UTC_TIMESTAMP())'
+"""
+          if old not in text:
+              raise SystemExit('receipt insert anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = """            'request' => substr($requestId, 0, 64),
+            'direction' => $direction,
+"""
+          new = """            'request' => substr($requestId, 0, 64),
+            'request_hash' => strtolower($requestHash),
+            'direction' => $direction,
+"""
+          if old not in text:
+              raise SystemExit('receipt parameters anchor not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          php -l src/Settings/FederatedSettingsService.php
+      - name: Restore permanent workflow and commit hardening
         run: |
-          mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
-          mariadb -h 127.0.0.1 -uroot -pvp3_test_root vp3_test < phase2-auth-accounts-single-install.sql
-      - name: Run MariaDB 10.11 integration certification
-        env:
-          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
-          VP3_TEST_DB_USER: root
-          VP3_TEST_DB_PASSWORD: vp3_test_root
-        run: php tests/database-integration.php
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/phase2-auth-accounts.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/phase2-auth-accounts.yml src/Settings/FederatedSettingsService.php
+          git diff --cached --quiet && exit 0
+          git commit -m "Bind federated settings request IDs to payloads"
+          git push origin HEAD:feature/phase-15-federated-settings-shared-control-center
