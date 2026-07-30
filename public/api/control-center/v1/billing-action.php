@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Vp3\ControlCenter\ControlCenterUrl;
 use Vp3\Http\ControlCenterEndpoint;
 use Vp3\Http\JsonResponse;
 
@@ -18,13 +19,15 @@ try {
     $action = strtolower(trim((string) ($payload['action'] ?? '')));
     $requestId = ControlCenterEndpoint::requestId($payload);
     $idempotencyKey = ControlCenterEndpoint::idempotencyKey($payload);
-    $baseUrl = rtrim((string) ($container['config']['app']['base_url'] ?? ''), '/');
-    $scheme = strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME));
-    if ($scheme !== 'https') {
+    $baseUrl = (string) ($container['config']['app']['base_url'] ?? '');
+    try {
+        $billingPage = ControlCenterUrl::absolute($baseUrl, '/billing.php', $account['account_public_id']);
+        $checkoutSuccess = ControlCenterUrl::absolute($baseUrl, '/billing.php', $account['account_public_id'], ['checkout' => 'success']);
+        $checkoutCanceled = ControlCenterUrl::absolute($baseUrl, '/billing.php', $account['account_public_id'], ['checkout' => 'canceled']);
+    } catch (InvalidArgumentException) {
         throw new RuntimeException('Secure billing is temporarily unavailable.');
     }
 
-    $billingPage = $baseUrl . '/billing.php?account_id=' . $account['account_id'];
     if ($action === 'checkout') {
         $planPublicId = trim((string) ($payload['plan_public_id'] ?? ''));
         if (!preg_match('/^[A-Za-z0-9._:-]{3,64}$/', $planPublicId)) {
@@ -46,8 +49,8 @@ try {
             $result = $container['stripe_checkout']->createCheckoutSession(
                 $account['account_id'],
                 $planId,
-                $billingPage . '&checkout=success',
-                $billingPage . '&checkout=canceled',
+                $checkoutSuccess,
+                $checkoutCanceled,
                 $requestId,
                 $idempotencyKey
             );
