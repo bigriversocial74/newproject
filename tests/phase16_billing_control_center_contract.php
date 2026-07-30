@@ -1,11 +1,11 @@
 <?php
 
 declare(strict_types=1);
-
 $root = dirname(__DIR__);
 $failures = [];
 $required = [
     'src/ControlCenter/AccountBillingQueryService.php',
+    'src/ControlCenter/ControlCenterUrl.php',
     'public/billing.php',
     'public/api/control-center/v1/billing-overview.php',
     'public/api/control-center/v1/billing-action.php',
@@ -17,6 +17,7 @@ foreach ($required as $path) {
 }
 $page = (string) @file_get_contents($root . '/public/billing.php');
 $shell = (string) @file_get_contents($root . '/src/ControlCenter/ControlCenterPage.php');
+$urlBuilder = (string) @file_get_contents($root . '/src/ControlCenter/ControlCenterUrl.php');
 $client = (string) @file_get_contents($root . '/public/assets/billing-control-center.js');
 $action = (string) @file_get_contents($root . '/public/api/control-center/v1/billing-action.php');
 $query = (string) @file_get_contents($root . '/src/ControlCenter/AccountBillingQueryService.php');
@@ -37,5 +38,8 @@ if (!str_contains($client, '{ ...payload, account_public_id: accountPublicId, cs
 if (str_contains($client, 'account_id') || str_contains($client, 'dataset.accountId')) $failures[] = 'Billing client retains a numeric account identity.';
 if (!str_contains($endpoint, "array_key_exists('account_id', \$payload)") || !str_contains($endpoint, 'account_public_identity_required')) $failures[] = 'Billing endpoint boundary does not reject legacy numeric account payloads.';
 foreach (['Secure billing checkout could not be created.', 'The secure billing portal could not be opened.', 'The billing provider returned an untrusted redirect.'] as $safeMessage) if (!str_contains($action, $safeMessage)) $failures[] = 'Billing provider error sanitization is missing: ' . $safeMessage;
+if (!str_contains($action, 'ControlCenterUrl::absolute') || !str_contains($action, "\$account['account_public_id']")) $failures[] = 'Billing return URLs do not use the shared public account URL boundary.';
+if (preg_match('/[?&]account_id=/', $action . $shell) === 1) $failures[] = 'Billing or shared navigation still generates a numeric account URL.';
+if (!str_contains($urlBuilder, 'PHP_QUERY_RFC3986') || !str_contains($urlBuilder, "array_key_exists('account_id', \$query)")) $failures[] = 'Public account URL builder does not enforce encoded, non-overridable identities.';
 if ($failures !== []) { fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL); exit(1); }
 echo "Phase 16 Billing and Plans control center contract passed.\n";

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Vp3\Auth\AuthPublicException;
+use Vp3\ControlCenter\ControlCenterUrl;
 use Vp3\Http\AuthEndpoint;
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
@@ -29,7 +30,19 @@ try {
             $token,
             $requestId
         );
-        header('Location: /account-security.php?account_id=' . $accountId . '&invitation=accepted', true, 303);
+        $statement = $container['database']->pdo()->prepare(
+            "SELECT a.public_id
+             FROM account_users au
+             JOIN accounts a ON a.id=au.account_id
+             WHERE au.account_id=? AND au.user_id=? AND au.status='active' AND a.status='active'
+             LIMIT 1"
+        );
+        $statement->execute([$accountId, (int) $current['user']['id']]);
+        $accountPublicId = (string) $statement->fetchColumn();
+        if ($accountPublicId === '') {
+            throw new RuntimeException('The accepted account is not available.');
+        }
+        header('Location: ' . ControlCenterUrl::relative('/account-security.php', $accountPublicId, ['invitation' => 'accepted']), true, 303);
         exit;
     }
     if ($token === '') {

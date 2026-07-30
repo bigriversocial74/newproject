@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 $root = dirname(__DIR__);
 $failures = [];
 $assert = static function (bool $condition, string $message) use (&$failures): void { if (!$condition) $failures[] = $message; };
@@ -15,6 +14,7 @@ $required = [
     'src/ControlCenter/PublicAccountIdentityResolver.php',
     'src/ControlCenter/AccountPageContext.php',
     'src/ControlCenter/ControlCenterPage.php',
+    'src/ControlCenter/ControlCenterUrl.php',
     'src/Http/ControlCenterEndpoint.php',
     'src/Http/HomeServerEndpoint.php',
     'public/homeservers.php',
@@ -28,6 +28,7 @@ foreach ($required as $path) $assert(is_file($root . '/' . $path), 'Missing Phas
 $resolver = $read('src/ControlCenter/PublicAccountIdentityResolver.php');
 $context = $read('src/ControlCenter/AccountPageContext.php');
 $shell = $read('src/ControlCenter/ControlCenterPage.php');
+$urlBuilder = $read('src/ControlCenter/ControlCenterUrl.php');
 $endpoint = $read('src/Http/ControlCenterEndpoint.php');
 $homeEndpoint = $read('src/Http/HomeServerEndpoint.php');
 $homePage = $read('public/homeservers.php');
@@ -45,7 +46,7 @@ $assert(str_contains($resolver, "'account_public_id' => (string) \$selected['pub
 
 $assert(str_contains($context, 'new PublicAccountIdentityResolver'), 'Page context bypasses the shared resolver.');
 $assert(str_contains($context, "\$_GET['account']"), 'Page routing does not use the public account query.');
-$assert(str_contains($shell, '?account='), 'Control Center shell does not emit public account routes.');
+$assert(str_contains($shell, 'ControlCenterUrl::relative') && str_contains($urlBuilder, "['account' => \$accountPublicId]"), 'Control Center shell does not emit validated public account routes.');
 $assert(str_contains($shell, 'data-account-public-id'), 'Control Center shell omits the public account data attribute.');
 $assert(!str_contains($shell, 'data-account-id=') && !str_contains($shell, '?account_id='), 'Control Center shell exposes numeric account routing.');
 $assert(str_contains($homePage, 'data-account-public-id') && str_contains($homePage, '?account='), 'HomeServer page exposes numeric account routing.');
@@ -90,6 +91,7 @@ $assert(str_contains($transferRequest, "SELECT id FROM accounts WHERE public_id=
 $allChanged = implode("\n", array_map($read, [
     'src/ControlCenter/AccountPageContext.php',
     'src/ControlCenter/ControlCenterPage.php',
+    'src/ControlCenter/ControlCenterUrl.php',
     'src/Http/ControlCenterEndpoint.php',
     'src/Http/HomeServerEndpoint.php',
     'public/homeservers.php',

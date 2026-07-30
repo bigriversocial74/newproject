@@ -16,7 +16,6 @@ final class ControlCenterPage
         $role = (string) ($selected['role'] ?? 'support_member');
         $selectedPublicId = (string) ($selected['public_id'] ?? '');
         $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $accountQuery = rawurlencode($selectedPublicId);
         $nav = [];
         if (in_array($role, ['customer_owner', 'customer_admin'], true)) {
             $nav = [
@@ -36,6 +35,8 @@ final class ControlCenterPage
             $nav = ['operations' => ['/operations.php', 'Operations']];
         }
         $nav['account-security'] = ['/account-security.php', 'Account & Security'];
+        $brandPath = $role === 'billing_manager' ? '/billing.php' : ($role === 'support_member' ? '/operations.php' : '/dashboard.php');
+        $brandUrl = ControlCenterUrl::relative($brandPath, $selectedPublicId);
         ?>
 <!doctype html>
 <html lang="en">
@@ -55,12 +56,12 @@ final class ControlCenterPage
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="<?= $role === 'billing_manager' ? '/billing.php' : ($role === 'support_member' ? '/operations.php' : '/dashboard.php') ?>?account=<?= $accountQuery ?>" aria-label="VP3 Control Center">
+    <a class="brand" href="<?= $escape($brandUrl) ?>" aria-label="VP3 Control Center">
       <span class="brand-mark">V3</span><span><strong>VP3</strong><small>Personal Online Deployment</small></span>
     </a>
     <nav class="nav" aria-label="VP3 Control Center">
       <?php foreach ($nav as $key => [$href, $label]): ?>
-        <a class="nav-link<?= $active === $key ? ' active' : '' ?>" href="<?= $escape($href) ?>?account=<?= $accountQuery ?>"><span class="nav-dot" aria-hidden="true"></span><?= $escape($label) ?></a>
+        <a class="nav-link<?= $active === $key ? ' active' : '' ?>" href="<?= $escape(ControlCenterUrl::relative($href, $selectedPublicId)) ?>"><span class="nav-dot" aria-hidden="true"></span><?= $escape($label) ?></a>
       <?php endforeach; ?>
     </nav>
     <div class="sidebar-foot"><span>Account-scoped control plane</span><small>Private POD and HomeServer content stays outside VP3.</small></div>

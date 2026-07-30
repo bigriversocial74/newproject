@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Vp3\Auth\AuthPublicException;
 use Vp3\ControlCenter\AccountPageContext;
 use Vp3\ControlCenter\ControlCenterPage;
+use Vp3\ControlCenter\ControlCenterUrl;
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
 try {
@@ -19,10 +20,11 @@ ControlCenterPage::renderStart(
     'Domains, PODs, HomeServers, subscriptions, and operational attention in one account view.'
 );
 $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$domainsUrl = ControlCenterUrl::relative('/domains.php', (string) $context['selected']['public_id']);
 ?>
 <section class="hero">
   <div><span class="eyebrow">Unified personal online deployment control</span><h2><?= $escape($context['selected']['display_name']) ?></h2><p>Manage the complete VP3 estate without crossing the privacy boundary into POD customer content or HomeServer private data.</p></div>
-  <div class="hero-actions"><button class="button light" id="refresh-control-center" type="button">Refresh Dashboard</button><a class="button primary" href="/domains.php?account_id=<?= (int) $context['selected']['id'] ?>">Manage Domains</a></div>
+  <div class="hero-actions"><button class="button light" id="refresh-control-center" type="button">Refresh Dashboard</button><a class="button primary" href="<?= $escape($domainsUrl) ?>">Manage Domains</a></div>
 </section>
 <div id="control-center-notice" aria-live="polite"></div>
 <section id="dashboard-metrics" class="metrics" aria-label="Account metrics"><div class="metric"><span>Status</span><strong>Loading…</strong></div></section>
