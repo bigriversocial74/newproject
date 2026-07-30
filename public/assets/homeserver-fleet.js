@@ -100,7 +100,7 @@
     if (!bundle) { modal.hidden = true; modal.innerHTML = ""; return; }
     modal.hidden = false;
     modal.innerHTML = `<div class="modal-card"><h2>One-time HomeServer activation bundle</h2><p class="help">Copy these values into the HomeServer Control Center now. VP3 will not display the credential or enrollment code again.</p><div class="secret-grid">
-      <div class="secret-row"><span>Account ID</span><code>${accountId()}</code></div>
+      <div class="secret-row"><span>Account ID</span><code>${Number(bundle.account_id)}</code></div>
       <div class="secret-row"><span>Device public ID</span><code>${escapeHtml(bundle.device_public_id)}</code></div>
       <div class="secret-row"><span>Device credential</span><code>${escapeHtml(bundle.credential || "Unavailable on replay")}</code></div>
       <div class="secret-row"><span>Enrollment code</span><code>${escapeHtml(bundle.enrollment_code || "Unavailable on replay")}</code></div>
@@ -112,7 +112,7 @@
   async function copyBundle() {
     const bundle = state.oneTimeBundle;
     if (!bundle) return;
-    const text = JSON.stringify({ account_id: accountId(), device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2);
+    const text = JSON.stringify({ account_id: Number(bundle.account_id), device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2);
     await navigator.clipboard.writeText(text);
     state.notice = { kind: "success", message: "One-time activation bundle copied." };
     render();
@@ -149,7 +149,7 @@
     state.busy = true;
     render();
     try {
-      state.oneTimeBundle = await api("/api/homeserver/v1/register.php", { license_id: licenseId, device_fingerprint: fingerprint, request_id: requestId(), idempotency_key: idempotencyKey() });
+      state.oneTimeBundle = { ...(await api("/api/homeserver/v1/register.php", { license_id: licenseId, device_fingerprint: fingerprint, request_id: requestId(), idempotency_key: idempotencyKey() })), account_id: accountId() };
       document.querySelector("#register-form")?.reset();
       state.notice = { kind: "success", message: "HomeServer registered. Complete activation in Control Center using the one-time bundle." };
       await load(true);
@@ -183,7 +183,7 @@
         const fingerprint = window.prompt("Paste the replacement HomeServer's 64-character local fingerprint:");
         if (!fingerprint) return;
         if (!/^[a-f0-9]{64}$/i.test(fingerprint.trim())) throw new Error("The replacement fingerprint must contain exactly 64 hexadecimal characters.");
-        state.oneTimeBundle = await api("/api/homeserver/v1/replace.php", { device_public_id: devicePublicId, replacement_fingerprint: fingerprint.trim(), request_id: requestId(), idempotency_key: idempotencyKey() });
+        state.oneTimeBundle = { ...(await api("/api/homeserver/v1/replace.php", { device_public_id: devicePublicId, replacement_fingerprint: fingerprint.trim(), request_id: requestId(), idempotency_key: idempotencyKey() })), account_id: accountId() };
         state.notice = { kind: "success", message: "Replacement registered. Activate the new HomeServer with the one-time bundle." };
       } else if (action === "transfer") {
         const target = Number(window.prompt("Enter the destination VP3 account ID:") || 0);
@@ -206,6 +206,6 @@
 
   document.querySelector("#register-form")?.addEventListener("submit", register);
   document.querySelector("#refresh-fleet")?.addEventListener("click", () => load());
-  accountSelect?.addEventListener("change", () => load());
+  accountSelect?.addEventListener("change", () => { state.oneTimeBundle = null; state.notice = null; load(); });
   load();
 })();
