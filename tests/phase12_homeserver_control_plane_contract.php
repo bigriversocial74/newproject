@@ -42,7 +42,7 @@ foreach ([
 $assert(str_contains($endpoint, 'MAX_JSON_BYTES = 65536'), 'HomeServer JSON body limit is missing.');
 $assert(str_contains($endpoint, 'Bearer\\s+'), 'Bearer device authentication is missing.');
 $assert(str_contains($endpoint, 'assertCsrf'), 'Account mutation CSRF enforcement is missing.');
-$assert(str_contains($endpoint, "role IN ('owner','administrator')"), 'Account owner/administrator authorization is missing.');
+$assert(str_contains($endpoint, "role IN ('customer_owner','customer_admin')"), 'Current customer owner/administrator authorization is missing.');
 $assert(str_contains($service, "hash('sha256', \$token)"), 'Installer grant hashing is missing.');
 $assert(str_contains($service, 'function revokeSoftwareAuthority('), 'Software-only suspension revocation helper is missing.');
 $assert(str_contains($service, "\$this->revokeSoftwareAuthority(\$pdo, (int) \$device['id']);"), 'Suspension does not use the software-only authority boundary.');
