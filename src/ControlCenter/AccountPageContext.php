@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Vp3\ControlCenter;
 
 use PDO;
-use RuntimeException;
+use Vp3\Auth\AuthPublicException;
 use Vp3\Http\AuthEndpoint;
 
 final class AccountPageContext
@@ -32,7 +32,11 @@ final class AccountPageContext
         $statement->execute(['user' => (int) $current['user']['id']]);
         $accounts = $statement->fetchAll(PDO::FETCH_ASSOC);
         if ($accounts === []) {
-            throw new RuntimeException('Account membership is unavailable.');
+            throw new AuthPublicException(
+                'account_membership_required',
+                'An active VP3 owner or administrator account is required.',
+                403
+            );
         }
 
         $requested = max(0, (int) ($_GET['account_id'] ?? 0));
