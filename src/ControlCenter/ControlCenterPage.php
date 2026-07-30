@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Vp3\ControlCenter;
 
+use Vp3\Auth\AuthPublicException;
+
 final class ControlCenterPage
 {
     /** @param array<string,mixed> $context */
@@ -79,12 +81,13 @@ final class ControlCenterPage
 <?php
     }
 
-    public static function renderSignInRequired(string $title): never
+    public static function renderAccessFailure(string $title, AuthPublicException $exception): never
     {
         self::securityHeaders();
-        http_response_code(401);
+        http_response_code($exception->httpStatus());
+        $heading = $exception->httpStatus() === 401 ? 'Sign in required' : 'Account access required';
         ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?= htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></title><link rel="stylesheet" href="/assets/control-center.css"></head><body class="auth-required"><main class="auth-card"><span class="brand-mark">V3</span><h1>Sign in required</h1><p>Sign in to an active VP3 owner or administrator account to open the control center.</p></main></body></html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?= htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></title><link rel="stylesheet" href="/assets/control-center.css"></head><body class="auth-required"><main class="auth-card"><span class="brand-mark">V3</span><h1><?= htmlspecialchars($heading, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></h1><p><?= htmlspecialchars($exception->publicMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></main></body></html>
 <?php
         exit;
     }
