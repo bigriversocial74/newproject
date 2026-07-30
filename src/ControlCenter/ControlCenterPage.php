@@ -24,9 +24,12 @@ final class ControlCenterPage
                 'domains' => ['/domains.php', 'Domains'],
                 'pods' => ['/pods.php', 'PODs'],
                 'homeservers' => ['/homeservers.php', 'HomeServers'],
+                'operations' => ['/operations.php', 'Operations'],
             ];
         } elseif ($role === 'billing_manager') {
             $nav = ['billing' => ['/billing.php', 'Billing & Plans']];
+        } elseif ($role === 'support_member') {
+            $nav = ['operations' => ['/operations.php', 'Operations']];
         }
         $nav['account-security'] = ['/account-security.php', 'Account & Security'];
         ?>
@@ -40,11 +43,12 @@ final class ControlCenterPage
   <link rel="stylesheet" href="/assets/homeserver-control-center-compat.css">
   <link rel="stylesheet" href="/assets/billing-control-center.css">
   <link rel="stylesheet" href="/assets/account-security.css">
+  <link rel="stylesheet" href="/assets/operations-control-center.css">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="<?= $role === 'billing_manager' ? '/billing.php' : ($role === 'support_member' ? '/account-security.php' : '/dashboard.php') ?>?account_id=<?= (int) $selected['id'] ?>" aria-label="VP3 Control Center">
+    <a class="brand" href="<?= $role === 'billing_manager' ? '/billing.php' : ($role === 'support_member' ? '/operations.php' : '/dashboard.php') ?>?account_id=<?= (int) $selected['id'] ?>" aria-label="VP3 Control Center">
       <span class="brand-mark">V3</span><span><strong>VP3</strong><small>Personal Online Deployment</small></span>
     </a>
     <nav class="nav" aria-label="VP3 Control Center">
