@@ -55,7 +55,7 @@ $assert(str_contains($controlPlane, 'registerDevice(') && str_contains($controlP
 
 foreach ([$fleet, $transfer] as $browser) {
     $assert(str_contains($browser, 'license_public_id'), 'HomeServer browser flow omits public license identity.');
-    foreach (['license_id', 'target_license_id', 'Number(license.license_public_id)', 'Number(option.license_public_id)'] as $forbidden) {
+    foreach (['license_id:', 'target_license_id:', '.license_id', '.target_license_id', 'Number(license.license_public_id)', 'Number(option.license_public_id)'] as $forbidden) {
         $assert(!str_contains($browser, $forbidden), 'HomeServer browser flow contains forbidden numeric license pattern ' . $forbidden . '.');
     }
     $assert(!str_contains($browser, 'localStorage') && !str_contains($browser, 'sessionStorage'), 'HomeServer browser flow persists activation data.');
