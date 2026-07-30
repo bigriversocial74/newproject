@@ -38,14 +38,18 @@ $assert(!str_contains($service, 'token_hash'), 'Fleet service exposes or queries
 $assert(!str_contains($service, "'device_fingerprint' =>"), 'Fleet response exposes the device fingerprint.');
 $assert(str_contains($service, "'event_count_24h'"), 'Fleet response does not bound operational event counts to the recent window.');
 $assert(str_contains($options, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
+$assert(str_contains($options, 'hs.id IS NULL'), 'Eligible-license query does not require an unoccupied license.');
 $assert(str_contains($options, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
 $assert(str_contains($page, "role IN ('owner','administrator')"), 'Fleet page does not require an owner or administrator role.');
 $assert(str_contains($page, "header('Cache-Control: no-store')"), 'Fleet page does not disable response caching.');
+$assert(str_contains($page, 'Content-Security-Policy'), 'Fleet page does not enforce a restrictive content security policy.');
 $assert(str_contains($client, '/api/homeserver/v1/register.php'), 'Fleet client cannot register a HomeServer.');
 $assert(str_contains($client, '/api/homeserver/v1/replace.php'), 'Fleet client cannot replace a HomeServer.');
 $assert(str_contains($client, '/api/homeserver/v1/transfer-request.php'), 'Fleet client cannot request a transfer.');
 $assert(str_contains($transferClient, '/api/homeserver/v1/transfer-accept.php'), 'Fleet client cannot accept a transfer.');
 $assert(str_contains($client, 'oneTimeBundle'), 'Registration and replacement credentials are not treated as one-time values.');
+$assert(str_contains($client, 'bundle.account_id'), 'Registration and replacement bundles are not bound to their issuing account.');
+$assert(str_contains($transferClient, 'bundleAccountId'), 'Transferred activation bundles are not bound to the destination account.');
 $assert(str_contains($transferClient, 'Transferred HomeServer activation bundle'), 'Transfer credentials are not presented through a one-time activation flow.');
 $assert(!str_contains($client, 'localStorage') && !str_contains($client, 'sessionStorage'), 'Fleet client persists one-time activation data in browser storage.');
 $assert(!str_contains($transferClient, 'localStorage') && !str_contains($transferClient, 'sessionStorage'), 'Transfer client persists one-time activation data in browser storage.');
