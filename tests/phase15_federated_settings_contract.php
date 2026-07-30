@@ -38,9 +38,13 @@ $assert(str_contains($installer, '20260730_phase15_federated_settings.sql'), 'Cu
 $assert(str_contains($migration, "authority ENUM('vp3','homeserver','shared')"), 'Settings catalog authority boundary is missing.');
 $assert(str_contains($migration, "sensitivity ENUM('non_secret')"), 'Settings catalog does not enforce non-secret values.');
 $assert(str_contains($migration, 'federated_settings_sync_receipts'), 'Settings sync receipts are missing.');
+$assert(str_contains($migration, 'request_hash CHAR(64) NOT NULL'), 'Settings sync receipts do not bind request IDs to canonical payload hashes.');
 $assert(str_contains($service, 'expectedRevision !== $currentRevision'), 'Optimistic revision enforcement is missing.');
 $assert(str_contains($service, "'vp3_authority'"), 'Device writes do not reject VP3-owned settings.');
 $assert(str_contains($service, 'authenticateDevice'), 'Device settings synchronization is not credential authenticated.');
+$assert(str_contains($service, "SELECT request_hash FROM federated_settings_sync_receipts"), 'Request replay does not load the canonical request hash.');
+$assert(str_contains($service, 'request ID was reused with a different payload'), 'Request IDs are not bound to one canonical payload.');
+$assert(str_contains($service, 'duplicate setting key'), 'Duplicate setting keys are not rejected before synchronization.');
 $assert(str_contains($signerSource, "algorithm() !== 'Ed25519'"), 'Federated settings do not fail closed without Ed25519.');
 foreach (['generated_at', 'replayed', 'applied', 'conflicts'] as $signedField) {
     $assert(str_contains($signerSource, "'{$signedField}' =>"), "Federated settings signature does not bind {$signedField}.");
