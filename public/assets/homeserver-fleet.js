@@ -26,12 +26,13 @@
   };
 
   async function api(path, payload = {}) {
+    const body = { ...payload, account_id: accountId(), csrf_token: csrfToken };
     const response = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-      body: JSON.stringify({ account_id: accountId(), csrf_token: csrfToken, ...payload }),
+      body: JSON.stringify(body),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.message || `VP3 request failed with HTTP ${response.status}`);
