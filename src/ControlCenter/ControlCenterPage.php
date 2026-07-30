@@ -14,13 +14,10 @@ final class ControlCenterPage
         self::securityHeaders();
         $accounts = $context['accounts'];
         $selected = $context['selected'];
-        $escape = static fn (mixed $value): string => htmlspecialchars(
-            (string) $value,
-            ENT_QUOTES | ENT_SUBSTITUTE,
-            'UTF-8'
-        );
+        $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $nav = [
             'dashboard' => ['/dashboard.php', 'Dashboard'],
+            'billing' => ['/billing.php', 'Billing & Plans'],
             'domains' => ['/domains.php', 'Domains'],
             'pods' => ['/pods.php', 'PODs'],
             'homeservers' => ['/homeservers.php', 'HomeServers'],
@@ -34,33 +31,26 @@ final class ControlCenterPage
   <title><?= $escape($title) ?> · VP3</title>
   <link rel="stylesheet" href="/assets/control-center.css">
   <link rel="stylesheet" href="/assets/homeserver-control-center-compat.css">
+  <link rel="stylesheet" href="/assets/billing-control-center.css">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
     <a class="brand" href="/dashboard.php?account_id=<?= (int) $selected['id'] ?>" aria-label="VP3 Dashboard">
-      <span class="brand-mark">V3</span>
-      <span><strong>VP3</strong><small>Personal Online Deployment</small></span>
+      <span class="brand-mark">V3</span><span><strong>VP3</strong><small>Personal Online Deployment</small></span>
     </a>
     <nav class="nav" aria-label="VP3 Control Center">
       <?php foreach ($nav as $key => [$href, $label]): ?>
-        <a class="nav-link<?= $active === $key ? ' active' : '' ?>" href="<?= $escape($href) ?>?account_id=<?= (int) $selected['id'] ?>">
-          <span class="nav-dot" aria-hidden="true"></span><?= $escape($label) ?>
-        </a>
+        <a class="nav-link<?= $active === $key ? ' active' : '' ?>" href="<?= $escape($href) ?>?account_id=<?= (int) $selected['id'] ?>"><span class="nav-dot" aria-hidden="true"></span><?= $escape($label) ?></a>
       <?php endforeach; ?>
     </nav>
-    <div class="sidebar-foot">
-      <span>Account-scoped control plane</span>
-      <small>Private POD and HomeServer content stays outside VP3.</small>
-    </div>
+    <div class="sidebar-foot"><span>Account-scoped control plane</span><small>Private POD and HomeServer content stays outside VP3.</small></div>
   </aside>
   <div class="app-main">
     <header class="topbar">
       <div><h1><?= $escape($title) ?></h1><p><?= $escape($description) ?></p></div>
       <label class="account-picker"><span>Account</span><select id="control-center-account">
-        <?php foreach ($accounts as $account): ?>
-          <option value="<?= (int) $account['id'] ?>" <?= (int) $account['id'] === (int) $selected['id'] ? 'selected' : '' ?>><?= $escape($account['display_name']) ?> · <?= $escape($account['role']) ?></option>
-        <?php endforeach; ?>
+        <?php foreach ($accounts as $account): ?><option value="<?= (int) $account['id'] ?>" <?= (int) $account['id'] === (int) $selected['id'] ? 'selected' : '' ?>><?= $escape($account['display_name']) ?> · <?= $escape($account['role']) ?></option><?php endforeach; ?>
       </select></label>
     </header>
     <main class="content" data-control-center data-account-id="<?= (int) $selected['id'] ?>" data-csrf-token="<?= $escape($context['csrf_token']) ?>" data-page="<?= $escape($active) ?>">
