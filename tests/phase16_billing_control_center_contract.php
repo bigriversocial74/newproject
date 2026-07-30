@@ -34,7 +34,7 @@ foreach (['billing-overview.php', 'billing-action.php', 'checkout.stripe.com', '
         $failures[] = 'Billing action contract is missing: ' . $needle;
     }
 }
-foreach (['accountContext', 'requestId', 'idempotencyKey', "base_url", "trustedStripeRedirect"] as $needle) {
+foreach (['accountContext', 'requestId', 'idempotencyKey', 'base_url', 'trustedStripeRedirect'] as $needle) {
     if (!str_contains($action, $needle)) {
         $failures[] = 'Billing endpoint boundary is missing: ' . $needle;
     }
@@ -56,6 +56,17 @@ foreach (['stripe_session_id', 'stripe_customer_id', 'stripe_subscription_id', '
 }
 if (!str_contains($query, 'WHERE account_id=:account') && !str_contains($query, 'WHERE s.account_id=:account')) {
     $failures[] = 'Billing read model is missing account-scoped queries.';
+}
+foreach (['checkout_interval', 'checkout_currency', 'checkout_amount'] as $pricingField) {
+    if (!str_contains($query, $pricingField)) {
+        $failures[] = 'Subscription billing does not use the active Stripe mapping: ' . $pricingField;
+    }
+}
+if (!str_contains($client, "hasCurrentSubscription ? 'Add Another' : 'Choose Plan'")) {
+    $failures[] = 'Existing subscriptions do not retain the Add Another checkout path.';
+}
+if (str_contains($client, 'button.disabled = currentPlans.has(item.public_id)')) {
+    $failures[] = 'An existing plan still disables repeat subscription checkout.';
 }
 if (str_contains($page, '<script>') || str_contains($page, '<style') || str_contains($page, ' style=')) {
     $failures[] = 'Billing page violates the external script/style CSP contract.';
