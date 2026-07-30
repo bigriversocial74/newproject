@@ -23,6 +23,7 @@ final class ControlCenterPage
                 'billing' => ['/billing.php', 'Billing & Plans'],
                 'domains' => ['/domains.php', 'Domains'],
                 'pods' => ['/pods.php', 'PODs'],
+                'recovery' => ['/recovery.php', 'Recovery & Updates'],
                 'homeservers' => ['/homeservers.php', 'HomeServers'],
                 'operations' => ['/operations.php', 'Operations'],
             ];
@@ -44,6 +45,7 @@ final class ControlCenterPage
   <link rel="stylesheet" href="/assets/billing-control-center.css">
   <link rel="stylesheet" href="/assets/account-security.css">
   <link rel="stylesheet" href="/assets/operations-control-center.css">
+  <link rel="stylesheet" href="/assets/recovery-control-center.css">
 </head>
 <body>
 <div class="app-shell">
