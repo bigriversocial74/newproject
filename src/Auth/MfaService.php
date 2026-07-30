@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 namespace Vp3\Auth;
 
 use DateTimeImmutable;
@@ -47,14 +46,24 @@ final class MfaService
         $context = $this->context($userId);
         $encrypted = $this->cipher->encrypt($secret, $context);
         $now = new DateTimeImmutable('now');
+        $nowText = $now->format('Y-m-d H:i:s');
         $label = trim($displayName) !== '' ? trim($displayName) : strtolower(trim($email));
-        $this->database->transaction(function (PDO $pdo) use ($userId, $encrypted, $label, $now, $requestId): void {
+
+        $this->database->transaction(function (PDO $pdo) use ($userId, $encrypted, $label, $nowText, $requestId): void {
+            $existing = $pdo->prepare(
+                "SELECT status FROM auth_mfa_methods WHERE user_id=:user AND method_type='totp' LIMIT 1 FOR UPDATE"
+            );
+            $existing->execute(['user' => $userId]);
+            if ((string) $existing->fetchColumn() === 'active') {
+                throw new AuthPublicException('mfa_already_enabled', 'Disable the current MFA method before starting a new enrollment.', 409);
+            }
+
             $pdo->prepare('DELETE FROM auth_mfa_recovery_codes WHERE user_id=:user')->execute(['user' => $userId]);
             $pdo->prepare(
                 "INSERT INTO auth_mfa_methods
                  (user_id,method_type,status,secret_ciphertext,secret_nonce,secret_tag,secret_key_id,label,last_used_counter,
                   activated_at,disabled_at,created_at,updated_at)
-                 VALUES (:user,'totp','pending',:ciphertext,:nonce,:tag,:key_id,:label,NULL,NULL,NULL,:now,:now)
+                 VALUES (:user,'totp','pending',:ciphertext,:nonce,:tag,:key_id,:label,NULL,NULL,NULL,:created_at,:updated_at)
                  ON DUPLICATE KEY UPDATE status='pending',secret_ciphertext=VALUES(secret_ciphertext),secret_nonce=VALUES(secret_nonce),
                    secret_tag=VALUES(secret_tag),secret_key_id=VALUES(secret_key_id),label=VALUES(label),last_used_counter=NULL,
                    activated_at=NULL,disabled_at=NULL,updated_at=VALUES(updated_at)"
@@ -65,10 +74,12 @@ final class MfaService
                 'tag' => $encrypted['tag'],
                 'key_id' => $encrypted['key_id'],
                 'label' => mb_substr($label, 0, 190),
-                'now' => $now->format('Y-m-d H:i:s'),
+                'created_at' => $nowText,
+                'updated_at' => $nowText,
             ]);
             $this->receipt($pdo, null, $userId, $userId, 'mfa.enrollment_started', 'success', $requestId, ['method' => 'totp']);
         });
+
         $issuer = 'VP3.me';
         $account = strtolower(trim($email));
         $uri = 'otpauth://totp/' . rawurlencode($issuer . ':' . $account)
@@ -92,18 +103,29 @@ final class MfaService
                 $this->receipt($pdo, null, $userId, $userId, 'mfa.enrollment_confirmed', 'denied', $requestId, ['reason' => 'invalid_code']);
                 return ['denied' => 'invalid_code'];
             }
-            $now = new DateTimeImmutable('now');
+
+            $nowText = (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
             $pdo->prepare(
-                "UPDATE auth_mfa_methods SET status='active',last_used_counter=:counter,activated_at=:now,disabled_at=NULL,updated_at=:now
+                "UPDATE auth_mfa_methods
+                 SET status='active',last_used_counter=:counter,activated_at=:activated_at,disabled_at=NULL,updated_at=:updated_at
                  WHERE id=:id AND status='pending'"
-            )->execute(['counter' => $counter, 'now' => $now->format('Y-m-d H:i:s'), 'id' => $method['id']]);
+            )->execute([
+                'counter' => $counter,
+                'activated_at' => $nowText,
+                'updated_at' => $nowText,
+                'id' => $method['id'],
+            ]);
             $pdo->prepare('DELETE FROM auth_mfa_recovery_codes WHERE user_id=:user')->execute(['user' => $userId]);
             $codes = $this->newRecoveryCodes();
             $insert = $pdo->prepare(
-                'INSERT INTO auth_mfa_recovery_codes (user_id,code_hash,used_at,created_at) VALUES (:user,:hash,NULL,:now)'
+                'INSERT INTO auth_mfa_recovery_codes (user_id,code_hash,used_at,created_at) VALUES (:user,:hash,NULL,:created_at)'
             );
             foreach ($codes as $recoveryCode) {
-                $insert->execute(['user' => $userId, 'hash' => hash('sha256', $this->normalizeRecoveryCode($recoveryCode)), 'now' => $now->format('Y-m-d H:i:s')]);
+                $insert->execute([
+                    'user' => $userId,
+                    'hash' => hash('sha256', $this->normalizeRecoveryCode($recoveryCode)),
+                    'created_at' => $nowText,
+                ]);
             }
             $this->receipt($pdo, null, $userId, $userId, 'mfa.enrollment_confirmed', 'success', $requestId, ['recovery_code_count' => count($codes)]);
             $this->audit->record('auth.mfa.enabled', 'success', $userId, null, 'user', null, ['method' => 'totp'], $requestId);
@@ -118,21 +140,28 @@ final class MfaService
     public function disable(int $userId, string $password, string $requestId): void
     {
         $this->database->transaction(function (PDO $pdo) use ($userId, $password, $requestId): void {
-            $user = $pdo->prepare('SELECT password_hash FROM users WHERE id=:user AND status=\'active\' LIMIT 1 FOR UPDATE');
+            $user = $pdo->prepare("SELECT password_hash FROM users WHERE id=:user AND status='active' LIMIT 1 FOR UPDATE");
             $user->execute(['user' => $userId]);
             $hash = $user->fetchColumn();
             if (!is_string($hash) || !password_verify($password, $hash)) {
                 $this->receipt($pdo, null, $userId, $userId, 'mfa.disabled', 'denied', $requestId, ['reason' => 'password_invalid']);
                 throw new AuthPublicException('password_invalid', 'The current password is incorrect.', 403);
             }
-            $now = (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
+            $nowText = (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
             $pdo->prepare(
-                "UPDATE auth_mfa_methods SET status='disabled',secret_ciphertext='',secret_nonce='',secret_tag='',
-                 last_used_counter=NULL,disabled_at=:now,updated_at=:now WHERE user_id=:user AND method_type='totp'"
-            )->execute(['now' => $now, 'user' => $userId]);
+                "UPDATE auth_mfa_methods
+                 SET status='disabled',secret_ciphertext='',secret_nonce='',secret_tag='',last_used_counter=NULL,
+                     disabled_at=:disabled_at,updated_at=:updated_at
+                 WHERE user_id=:user AND method_type='totp'"
+            )->execute([
+                'disabled_at' => $nowText,
+                'updated_at' => $nowText,
+                'user' => $userId,
+            ]);
             $pdo->prepare('DELETE FROM auth_mfa_recovery_codes WHERE user_id=:user')->execute(['user' => $userId]);
-            $pdo->prepare('UPDATE auth_mfa_challenges SET consumed_at=:now WHERE user_id=:user AND consumed_at IS NULL')
-                ->execute(['now' => $now, 'user' => $userId]);
+            $pdo->prepare(
+                'UPDATE auth_mfa_challenges SET consumed_at=:consumed_at WHERE user_id=:user AND consumed_at IS NULL'
+            )->execute(['consumed_at' => $nowText, 'user' => $userId]);
             $this->receipt($pdo, null, $userId, $userId, 'mfa.disabled', 'success', $requestId, []);
             $this->audit->record('auth.mfa.disabled', 'success', $userId, null, 'user', null, [], $requestId);
         });
@@ -156,14 +185,16 @@ final class MfaService
         $token = self::token(32);
         $publicId = 'MFA-' . strtoupper(bin2hex(random_bytes(10)));
         $now = new DateTimeImmutable('now');
+        $nowText = $now->format('Y-m-d H:i:s');
         $expires = $now->modify('+' . max(60, $this->challengeTtlSeconds) . ' seconds');
-        $this->database->transaction(function (PDO $pdo) use ($userId, $ip, $userAgent, $token, $publicId, $now, $expires): void {
-            $pdo->prepare('UPDATE auth_mfa_challenges SET consumed_at=:now WHERE user_id=:user AND consumed_at IS NULL')
-                ->execute(['now' => $now->format('Y-m-d H:i:s'), 'user' => $userId]);
+        $this->database->transaction(function (PDO $pdo) use ($userId, $ip, $userAgent, $token, $publicId, $nowText, $expires): void {
+            $pdo->prepare(
+                'UPDATE auth_mfa_challenges SET consumed_at=:consumed_at WHERE user_id=:user AND consumed_at IS NULL'
+            )->execute(['consumed_at' => $nowText, 'user' => $userId]);
             $pdo->prepare(
                 'INSERT INTO auth_mfa_challenges
-                 (public_id,user_id,token_hash,ip_hash,user_agent_hash,expires_at,consumed_at,created_at)
-                 VALUES (:public,:user,:token_hash,:ip_hash,:ua_hash,:expires,NULL,:now)'
+                 (public_id,user_id,token_hash,ip_hash,user_agent_hash,attempt_count,max_attempts,expires_at,consumed_at,created_at)
+                 VALUES (:public,:user,:token_hash,:ip_hash,:ua_hash,0,6,:expires,NULL,:created_at)'
             )->execute([
                 'public' => $publicId,
                 'user' => $userId,
@@ -171,7 +202,7 @@ final class MfaService
                 'ip_hash' => hash('sha256', $ip),
                 'ua_hash' => hash('sha256', $userAgent),
                 'expires' => $expires->format('Y-m-d H:i:s'),
-                'now' => $now->format('Y-m-d H:i:s'),
+                'created_at' => $nowText,
             ]);
         });
         return ['challenge_token' => $token, 'challenge_public_id' => $publicId, 'expires_at' => $expires->format(DATE_ATOM)];
@@ -188,18 +219,47 @@ final class MfaService
             );
             $challenge->execute(['token_hash' => hash('sha256', trim($token))]);
             $row = $challenge->fetch(PDO::FETCH_ASSOC);
-            $now = new DateTimeImmutable('now');
-            if (!is_array($row) || $row['consumed_at'] !== null || $now >= new DateTimeImmutable((string) $row['expires_at'])
-                || !hash_equals((string) $row['ip_hash'], hash('sha256', $ip))
-                || !hash_equals((string) $row['user_agent_hash'], hash('sha256', $userAgent))
-                || (string) $row['user_status'] !== 'active') {
-                throw new AuthPublicException('mfa_challenge_invalid', 'The MFA challenge is invalid or expired.', 401);
+            if (!is_array($row)) {
+                return ['denied' => 'invalid_challenge'];
             }
+
+            $now = new DateTimeImmutable('now');
+            $nowText = $now->format('Y-m-d H:i:s');
             $userId = (int) $row['user_id'];
+            $expired = $now >= new DateTimeImmutable((string) $row['expires_at']);
+            $bound = hash_equals((string) $row['ip_hash'], hash('sha256', $ip))
+                && hash_equals((string) $row['user_agent_hash'], hash('sha256', $userAgent));
+            $attemptCount = (int) $row['attempt_count'];
+            $maxAttempts = max(1, (int) $row['max_attempts']);
+
+            if ($row['consumed_at'] !== null || $expired || !$bound || (string) $row['user_status'] !== 'active') {
+                if ($row['consumed_at'] === null) {
+                    $pdo->prepare(
+                        'UPDATE auth_mfa_challenges SET consumed_at=:consumed_at WHERE id=:id AND consumed_at IS NULL'
+                    )->execute(['consumed_at' => $nowText, 'id' => $row['id']]);
+                }
+                $reason = $expired ? 'expired' : (!$bound ? 'binding_mismatch' : ((string) $row['user_status'] !== 'active' ? 'user_inactive' : 'consumed'));
+                $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, ['reason' => $reason]);
+                return ['denied' => 'invalid_challenge'];
+            }
+
+            if ($attemptCount >= $maxAttempts) {
+                $pdo->prepare(
+                    'UPDATE auth_mfa_challenges SET consumed_at=:consumed_at WHERE id=:id AND consumed_at IS NULL'
+                )->execute(['consumed_at' => $nowText, 'id' => $row['id']]);
+                $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, ['reason' => 'attempt_limit']);
+                return ['denied' => 'attempt_limit'];
+            }
+
             $method = $this->method($pdo, $userId, true);
             if ($method === null || (string) $method['status'] !== 'active') {
-                throw new AuthPublicException('mfa_challenge_invalid', 'The MFA challenge is invalid or expired.', 401);
+                $pdo->prepare(
+                    'UPDATE auth_mfa_challenges SET consumed_at=:consumed_at WHERE id=:id AND consumed_at IS NULL'
+                )->execute(['consumed_at' => $nowText, 'id' => $row['id']]);
+                $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, ['reason' => 'method_inactive']);
+                return ['denied' => 'invalid_challenge'];
             }
+
             $verified = false;
             $normalizedRecovery = $this->normalizeRecoveryCode($code);
             if (preg_match('/^[A-Z0-9]{12}$/', $normalizedRecovery)) {
@@ -209,32 +269,70 @@ final class MfaService
                 $recovery->execute(['user' => $userId, 'hash' => hash('sha256', $normalizedRecovery)]);
                 $recoveryId = (int) $recovery->fetchColumn();
                 if ($recoveryId > 0) {
-                    $pdo->prepare('UPDATE auth_mfa_recovery_codes SET used_at=:now WHERE id=:id AND used_at IS NULL')
-                        ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $recoveryId]);
-                    $verified = true;
+                    $consumeRecovery = $pdo->prepare(
+                        'UPDATE auth_mfa_recovery_codes SET used_at=:used_at WHERE id=:id AND used_at IS NULL'
+                    );
+                    $consumeRecovery->execute(['used_at' => $nowText, 'id' => $recoveryId]);
+                    $verified = $consumeRecovery->rowCount() === 1;
                 }
             } else {
                 $secret = $this->decryptMethod($method, $userId);
                 $lastCounter = $method['last_used_counter'] === null ? null : (int) $method['last_used_counter'];
                 $counter = $this->matchingCounter($secret, $code, $lastCounter);
                 if ($counter !== null) {
-                    $pdo->prepare('UPDATE auth_mfa_methods SET last_used_counter=:counter,updated_at=:now WHERE id=:id')
-                        ->execute(['counter' => $counter, 'now' => $now->format('Y-m-d H:i:s'), 'id' => $method['id']]);
+                    $pdo->prepare(
+                        'UPDATE auth_mfa_methods SET last_used_counter=:counter,updated_at=:updated_at WHERE id=:id'
+                    )->execute(['counter' => $counter, 'updated_at' => $nowText, 'id' => $method['id']]);
                     $verified = true;
                 }
             }
+
             if (!$verified) {
-                $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, ['reason' => 'code_invalid']);
-                return ['denied' => 'invalid_code'];
+                $nextAttempt = $attemptCount + 1;
+                $locked = $nextAttempt >= $maxAttempts;
+                $pdo->prepare(
+                    'UPDATE auth_mfa_challenges
+                     SET attempt_count=:attempt_count,consumed_at=:consumed_at
+                     WHERE id=:id AND consumed_at IS NULL'
+                )->execute([
+                    'attempt_count' => $nextAttempt,
+                    'consumed_at' => $locked ? $nowText : null,
+                    'id' => $row['id'],
+                ]);
+                $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'denied', $requestId, [
+                    'reason' => $locked ? 'attempt_limit' : 'code_invalid',
+                    'attempt_count' => $nextAttempt,
+                    'max_attempts' => $maxAttempts,
+                ]);
+                return ['denied' => $locked ? 'attempt_limit' : 'invalid_code'];
             }
-            $pdo->prepare('UPDATE auth_mfa_challenges SET consumed_at=:now WHERE id=:id AND consumed_at IS NULL')
-                ->execute(['now' => $now->format('Y-m-d H:i:s'), 'id' => $row['id']]);
+
+            $consumeChallenge = $pdo->prepare(
+                'UPDATE auth_mfa_challenges SET consumed_at=:consumed_at WHERE id=:id AND consumed_at IS NULL'
+            );
+            $consumeChallenge->execute(['consumed_at' => $nowText, 'id' => $row['id']]);
+            if ($consumeChallenge->rowCount() !== 1) {
+                return ['denied' => 'invalid_challenge'];
+            }
             $this->receipt($pdo, null, $userId, $userId, 'mfa.challenge_completed', 'success', $requestId, []);
             $this->audit->record('auth.mfa.challenge_completed', 'success', $userId, null, 'user', (string) $row['user_public_id'], [], $requestId);
-            return ['user' => ['id' => $userId, 'public_id' => (string) $row['user_public_id'], 'email' => (string) $row['email'], 'display_name' => (string) $row['display_name']]];
+            return ['user' => [
+                'id' => $userId,
+                'public_id' => (string) $row['user_public_id'],
+                'email' => (string) $row['email'],
+                'display_name' => (string) $row['display_name'],
+            ]];
         });
-        if (($result['denied'] ?? null) === 'invalid_code') {
+
+        $denied = $result['denied'] ?? null;
+        if ($denied === 'invalid_code') {
             throw new AuthPublicException('mfa_code_invalid', 'The verification code is invalid or already used.', 401);
+        }
+        if ($denied === 'attempt_limit') {
+            throw new AuthPublicException('mfa_challenge_locked', 'The MFA challenge has been locked. Sign in again to continue.', 401);
+        }
+        if ($denied !== null) {
+            throw new AuthPublicException('mfa_challenge_invalid', 'The MFA challenge is invalid or expired.', 401);
         }
         return $result['user'];
     }
@@ -310,11 +408,18 @@ final class MfaService
     /** @param array<string,mixed> $metadata */
     private function receipt(PDO $pdo, ?int $accountId, ?int $actorUserId, ?int $targetUserId, string $action, string $result, string $requestId, array $metadata): void
     {
-        $evidence = ['action' => $action, 'result' => $result, 'account_id' => $accountId, 'actor_user_id' => $actorUserId, 'target_user_id' => $targetUserId, 'metadata' => $metadata];
+        $evidence = [
+            'action' => $action,
+            'result' => $result,
+            'account_id' => $accountId,
+            'actor_user_id' => $actorUserId,
+            'target_user_id' => $targetUserId,
+            'metadata' => $metadata,
+        ];
         $pdo->prepare(
             'INSERT INTO account_security_receipts
              (public_id,account_id,actor_user_id,target_user_id,action,result,request_id,evidence_hash,created_at)
-             VALUES (:public,:account,:actor,:target,:action,:result,:request,:hash,:now)'
+             VALUES (:public,:account,:actor,:target,:action,:result,:request,:hash,:created_at)'
         )->execute([
             'public' => 'SEC-' . strtoupper(bin2hex(random_bytes(10))),
             'account' => $accountId,
@@ -324,7 +429,7 @@ final class MfaService
             'result' => $result,
             'request' => $requestId,
             'hash' => hash('sha256', json_encode($evidence, JSON_THROW_ON_ERROR)),
-            'now' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
+            'created_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
         ]);
     }
 
