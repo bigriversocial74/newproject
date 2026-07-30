@@ -6,6 +6,7 @@ $root = dirname(__DIR__);
 $required = [
     'database/migrations/20260730_phase15_federated_settings.sql',
     'src/Settings/FederatedSettingsService.php',
+    'src/Settings/FederatedSettingsSigner.php',
     'public/settings.php',
     'public/assets/federated-settings.js',
     'public/assets/federated-settings.css',
@@ -21,8 +22,13 @@ $read = static fn (string $path): string => (string) file_get_contents($root . '
 $migration = $read('database/migrations/20260730_phase15_federated_settings.sql');
 $installer = $read('database/vp3-single-install.sql');
 $service = $read('src/Settings/FederatedSettingsService.php');
+$signerSource = $read('src/Settings/FederatedSettingsSigner.php');
 $deviceEndpoint = $read('public/api/homeserver/v1/settings-sync.php');
 $browserEndpoint = $read('public/api/settings/v1/update.php');
+$snapshotEndpoint = $read('public/api/settings/v1/snapshot.php');
+$endpointBoundary = $read('src/Http/HomeServerEndpoint.php');
+$settingsPage = $read('public/settings.php');
+$fleetPage = $read('public/homeservers.php');
 $javascript = $read('public/assets/federated-settings.js');
 
 $assert = static function (bool $condition, string $message) use (&$failures): void {
@@ -35,12 +41,47 @@ $assert(str_contains($migration, 'federated_settings_sync_receipts'), 'Settings 
 $assert(str_contains($service, 'expectedRevision !== $currentRevision'), 'Optimistic revision enforcement is missing.');
 $assert(str_contains($service, "'vp3_authority'"), 'Device writes do not reject VP3-owned settings.');
 $assert(str_contains($service, 'authenticateDevice'), 'Device settings synchronization is not credential authenticated.');
+$assert(str_contains($signerSource, "algorithm() !== 'Ed25519'"), 'Federated settings do not fail closed without Ed25519.');
 $assert(str_contains($deviceEndpoint, 'bearerCredential'), 'Device sync endpoint does not require a bearer credential.');
 $assert(str_contains($deviceEndpoint, 'requestId'), 'Device sync endpoint does not require a request ID.');
+$assert(str_contains($deviceEndpoint, 'FederatedSettingsSigner'), 'Device sync response is not signed.');
 $assert(str_contains($browserEndpoint, 'accountContext'), 'Browser setting mutation is not account scoped.');
+$assert(str_contains($browserEndpoint, 'FederatedSettingsSigner') && str_contains($snapshotEndpoint, 'FederatedSettingsSigner'), 'Browser settings snapshots are not signed.');
+foreach ([$endpointBoundary, $settingsPage, $fleetPage] as $roleBoundary) {
+    $assert(str_contains($roleBoundary, 'customer_owner') && str_contains($roleBoundary, 'customer_admin'), 'A dashboard authorization boundary uses obsolete account roles.');
+}
 $assert(!str_contains($javascript, 'localStorage') && !str_contains($javascript, 'sessionStorage'), 'Browser settings UI persists state in browser storage.');
 foreach (['secret_key','private_key','password','credential'] as $forbidden) {
     $assert(!str_contains($migration, "'{$forbidden}."), "Secret-like setting key {$forbidden} entered the federated catalog.");
+}
+
+if (function_exists('sodium_crypto_sign_keypair')) {
+    require_once $root . '/src/HomeServers/HomeServerLeaseSigner.php';
+    require_once $root . '/src/Settings/FederatedSettingsSigner.php';
+    $pair = sodium_crypto_sign_keypair();
+    $private = base64_encode(sodium_crypto_sign_secretkey($pair));
+    $public = base64_encode(sodium_crypto_sign_publickey($pair));
+    $leaseSigner = new Vp3\HomeServers\HomeServerLeaseSigner($private, $public, 'homeserver-lease-test-v1');
+    $settingsSigner = new Vp3\Settings\FederatedSettingsSigner($leaseSigner);
+    $signed = $settingsSigner->sign([
+        'schema' => 'vp3.federated-settings.v1',
+        'account_id' => 7,
+        'device_public_id' => 'HS-TEST',
+        'max_revision' => 2,
+        'settings' => [['setting_key' => 'appearance.theme', 'value' => 'dark']],
+        'snapshot_hash' => str_repeat('a', 64),
+    ]);
+    $assert($signed['signature_algorithm'] === 'Ed25519', 'Federated settings signer did not emit Ed25519.');
+    $assert($signed['signing_key_id'] === 'homeserver-lease-test-v1', 'Federated settings signer emitted the wrong key ID.');
+    $assert($leaseSigner->verify($signed['signed_document'], $signed['signature']), 'Federated settings signature cannot be verified.');
+    $document = strtr((string) $signed['signed_document'], '-_', '+/');
+    $padding = strlen($document) % 4;
+    if ($padding > 0) $document .= str_repeat('=', 4 - $padding);
+    $claims = json_decode((string) base64_decode($document, true), true, 32, JSON_THROW_ON_ERROR);
+    $assert(($claims['snapshot_hash'] ?? null) === str_repeat('a', 64), 'Signed settings document does not bind the snapshot hash.');
+    $assert((int) ($claims['exp'] ?? 0) > (int) ($claims['iat'] ?? 0), 'Signed settings document expiration is invalid.');
+} else {
+    $failures[] = 'The sodium extension is required for the Phase 15 signing contract.';
 }
 
 if ($failures !== []) {
