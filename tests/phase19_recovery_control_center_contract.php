@@ -39,7 +39,7 @@ $assert(str_contains($action, 'ControlCenterEndpoint::requestId'), 'Recovery mut
 $assert(str_contains($action, 'ControlCenterEndpoint::idempotencyKey'), 'Destructive recovery queues do not require idempotency keys.');
 $assert(str_contains($actions, 'LIMIT 1 FOR UPDATE'), 'Recovery action service does not lock role/resource state.');
 $assert(str_contains($actions, 'hash_equals($stored,$role)'), 'Recovery action service trusts stale caller roles.');
-$assert(str_contains($actions, "$confirm !== 'RESTORE'"), 'Verified restore lacks exact confirmation.');
+$assert(str_contains($actions, '$confirm !== \'RESTORE\''), 'Verified restore lacks exact confirmation.');
 $assert(str_contains($actions, 'manifest_signature'), 'Update queue does not require signed releases.');
 $assert(str_contains($actions, 'SoftwareUpdateService::STAGES'), 'Update queue does not create the certified update stages.');
 $assert(str_contains($nav, "'recovery' => ['/recovery.php', 'Recovery & Updates']"), 'Control Center navigation omits Recovery & Updates.');
