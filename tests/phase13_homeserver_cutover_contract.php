@@ -36,6 +36,10 @@ $assert(str_contains($migration, 'file_name VARCHAR(190)'), 'HomeServer canonica
 $assert(str_contains($catalog, "fileName !== 'Microgifter-HomeServer-Setup.exe'"), 'Canonical HomeServer installer filename enforcement is missing.');
 $assert(str_contains($catalog, "(?:[A-F0-9]{40}|[A-F0-9]{64})"), 'Authenticode thumbprint format enforcement is missing.');
 $assert(str_contains($catalog, 'authenticode_thumbprint,size_bytes FROM release_artifacts'), 'Authenticode thumbprint is not included in the signed manifest.');
+$download = $read('public/api/homeserver/v1/installer-download.php');
+$assert(str_contains($catalog, "'published_at_utc'"), 'Signed HomeServer release publication time is missing.');
+$assert(str_contains($catalog, "'installer_download_path'"), 'Signed stable HomeServer installer path is missing.');
+$assert(str_contains($download, 'HomeServerEndpoint::bearerCredential()'), 'Installer grants cannot be supplied as bearer credentials.');
 $assert(str_contains($installer, '20260729_phase13_homeserver_cutover_contract.sql'), 'Cumulative installer omits Phase 13.');
 $assert(!str_contains($migration, 'credential') && !str_contains($migration, 'token'), 'Phase 13 trust migration stores a credential or token.');
 

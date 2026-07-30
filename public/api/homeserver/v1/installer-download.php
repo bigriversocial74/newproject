@@ -8,7 +8,10 @@ use Vp3\Http\JsonResponse;
 $container = require __DIR__ . '/_bootstrap.php';
 HomeServerEndpoint::requireMethod('GET');
 try {
-    $grant = (string) ($_GET['grant'] ?? '');
+    $grant = trim((string) ($_GET['grant'] ?? ''));
+    if ($grant === '') {
+        $grant = HomeServerEndpoint::bearerCredential();
+    }
     $artifact = $container['homeserver_control_plane']->consumeInstallerGrant($grant);
     $root = realpath((string) (getenv('VP3_HOMESERVER_ARTIFACT_ROOT') ?: dirname(__DIR__, 4) . '/storage/releases'));
     if ($root === false || !is_dir($root)) {

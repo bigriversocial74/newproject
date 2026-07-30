@@ -266,6 +266,8 @@ final class ReleaseCatalogService
             'channel' => $release['channel'],
             'emergency_override' => (bool) $release['emergency_override'],
             'release_notes_hash' => $release['release_notes_hash'],
+            'published_at_utc' => gmdate('Y-m-d\TH:i:s\Z'),
+            'installer_download_path' => '/api/homeserver/v1/installer-download.php',
             'artifacts' => $artifacts->fetchAll(PDO::FETCH_ASSOC),
             'compatibility' => $compatibility->fetch(PDO::FETCH_ASSOC) ?: [],
             'initial_rollout' => $rollout->fetch(PDO::FETCH_ASSOC) ?: [],
