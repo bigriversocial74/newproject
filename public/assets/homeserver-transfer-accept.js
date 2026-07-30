@@ -47,6 +47,7 @@
   }
 
   function showBundle(bundle) {
+    const bundleAccountId = accountId();
     let modal = document.querySelector("#transfer-secret-modal");
     if (!modal) {
       modal = document.createElement("div");
@@ -55,9 +56,9 @@
       document.body.append(modal);
     }
     modal.hidden = false;
-    modal.innerHTML = `<div class="modal-card"><h2>Transferred HomeServer activation bundle</h2><p class="help">These rotated values are displayed once. Paste them into the transferred HomeServer's Control Center now.</p><div class="secret-grid"><div class="secret-row"><span>Account ID</span><code>${accountId()}</code></div><div class="secret-row"><span>Device public ID</span><code>${escapeHtml(bundle.device_public_id)}</code></div><div class="secret-row"><span>Device credential</span><code>${escapeHtml(bundle.credential)}</code></div><div class="secret-row"><span>Enrollment code</span><code>${escapeHtml(bundle.enrollment_code)}</code></div></div><div class="modal-actions"><button id="copy-transfer-bundle" class="button primary" type="button">Copy Bundle</button><button id="close-transfer-bundle" class="button ghost" type="button">I Stored It</button></div></div>`;
+    modal.innerHTML = `<div class="modal-card"><h2>Transferred HomeServer activation bundle</h2><p class="help">These rotated values are displayed once. Paste them into the transferred HomeServer's Control Center now.</p><div class="secret-grid"><div class="secret-row"><span>Account ID</span><code>${bundleAccountId}</code></div><div class="secret-row"><span>Device public ID</span><code>${escapeHtml(bundle.device_public_id)}</code></div><div class="secret-row"><span>Device credential</span><code>${escapeHtml(bundle.credential)}</code></div><div class="secret-row"><span>Enrollment code</span><code>${escapeHtml(bundle.enrollment_code)}</code></div></div><div class="modal-actions"><button id="copy-transfer-bundle" class="button primary" type="button">Copy Bundle</button><button id="close-transfer-bundle" class="button ghost" type="button">I Stored It</button></div></div>`;
     modal.querySelector("#copy-transfer-bundle")?.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(JSON.stringify({ account_id: accountId(), device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify({ account_id: bundleAccountId, device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2));
     });
     modal.querySelector("#close-transfer-bundle")?.addEventListener("click", () => {
       modal.innerHTML = "";
