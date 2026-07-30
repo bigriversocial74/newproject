@@ -126,6 +126,7 @@ jobs:
           php tests/phase20_infrastructure_stale_role_database_integration.php
           php tests/phase21_nested_transaction_database_integration.php
           php tests/phase21_domain_pod_lifecycle_database_integration.php
+          php tests/phase21_failed_pod_rollback_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-latest
@@ -180,3 +181,4 @@ jobs:
           php tests/phase20_infrastructure_stale_role_database_integration.php
           php tests/phase21_nested_transaction_database_integration.php
           php tests/phase21_domain_pod_lifecycle_database_integration.php
+          php tests/phase21_failed_pod_rollback_database_integration.php
