@@ -147,12 +147,13 @@
       return;
     }
     items.forEach((item) => {
+      const hasCurrentSubscription = currentPlans.has(item.public_id);
       const card = node('article', 'billing-plan-card');
       card.append(node('span', 'eyebrow', item.billing_interval), node('h4', '', item.name), node('strong', 'billing-price', money(item.amount, item.currency)));
       card.appendChild(node('p', '', `${item.entitlement_count} entitlement settings included.`));
-      const button = node('button', currentPlans.has(item.public_id) ? 'button light' : 'button primary', currentPlans.has(item.public_id) ? 'Current Plan' : 'Choose Plan');
+      const button = node('button', hasCurrentSubscription ? 'button light' : 'button primary', hasCurrentSubscription ? 'Add Another' : 'Choose Plan');
       button.type = 'button';
-      button.disabled = currentPlans.has(item.public_id) || !item.available_for_checkout;
+      button.disabled = !item.available_for_checkout;
       button.dataset.billingAction = 'checkout';
       button.dataset.planPublicId = item.public_id;
       card.appendChild(button);
