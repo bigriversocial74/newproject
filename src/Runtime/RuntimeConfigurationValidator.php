@@ -109,10 +109,17 @@ final class RuntimeConfigurationValidator
         }
         $this->requiredString($config, ['mail', 'sender_name'], 'MAIL_SENDER_NAME');
 
-        $leaseSigningKey = $this->requiredString($config, ['homeserver', 'lease_signing_key'], 'HOMESERVER_LEASE_SIGNING_KEY');
-        if (strlen($leaseSigningKey) < 32) {
-            throw new RuntimeException('HOMESERVER_LEASE_SIGNING_KEY must contain at least 32 bytes.');
-        }
+        $this->base64Length(
+            $this->requiredString($config, ['homeserver', 'lease_signing_private_key_base64'], 'VP3_HOMESERVER_LEASE_PRIVATE_KEY_B64'),
+            64,
+            'VP3_HOMESERVER_LEASE_PRIVATE_KEY_B64'
+        );
+        $this->base64Length(
+            $this->requiredString($config, ['homeserver', 'lease_signing_public_key_base64'], 'VP3_HOMESERVER_LEASE_PUBLIC_KEY_B64'),
+            32,
+            'VP3_HOMESERVER_LEASE_PUBLIC_KEY_B64'
+        );
+        $this->requiredString($config, ['homeserver', 'lease_signing_key_id'], 'VP3_HOMESERVER_LEASE_SIGNING_KEY_ID');
 
         $this->base64Length($this->requiredString($config, ['releases', 'signing_private_key_base64'], 'RELEASE_SIGNING_PRIVATE_KEY_B64'), 64, 'RELEASE_SIGNING_PRIVATE_KEY_B64');
         $this->base64Length($this->requiredString($config, ['releases', 'signing_public_key_base64'], 'RELEASE_SIGNING_PUBLIC_KEY_B64'), 32, 'RELEASE_SIGNING_PUBLIC_KEY_B64');
@@ -282,7 +289,7 @@ final class RuntimeConfigurationValidator
 
     private function absolutePath(string $path, string $label): void
     {
-        if (!str_starts_with($path, '/') && !preg_match('/^[A-Za-z]:[\\\\\/]/', $path)) {
+        if (!str_starts_with($path, '/') && !preg_match('/^[A-Za-z]:[\\\/]/', $path)) {
             throw new RuntimeException($label . ' must be an absolute path.');
         }
     }

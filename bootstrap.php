@@ -104,7 +104,11 @@ $billingGrace = new BillingGraceService($database);
 $podProvisioningAdapter = AdapterFactory::provisioning((string) $config['provisioning']['provider_driver'], $environment);
 $podProvisioning = new PodProvisioningService($database, $podProvisioningAdapter, new ProtectedConfigurationMerger(), (array) $config['provisioning']['protected_configuration_paths'], $queueLeaseSeconds);
 $podHealth = new PodHealthService($database);
-$homeServerLeaseSigner = new HomeServerLeaseSigner((string) $config['homeserver']['lease_signing_key'], (string) $config['homeserver']['lease_signing_key_id']);
+$homeServerLeaseSigner = new HomeServerLeaseSigner(
+    (string) $config['homeserver']['lease_signing_private_key_base64'],
+    (string) $config['homeserver']['lease_signing_public_key_base64'],
+    (string) $config['homeserver']['lease_signing_key_id']
+);
 $homeServers = new HomeServerRegistryService($database, $homeServerLeaseSigner, (int) $config['homeserver']['pairing_ttl_seconds'], (int) $config['homeserver']['lease_ttl_seconds']);
 $releaseManifestSigner = new ReleaseManifestSigner(
     (string) $config['releases']['signing_private_key_base64'],

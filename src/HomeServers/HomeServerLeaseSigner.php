@@ -8,36 +8,74 @@ use RuntimeException;
 
 final class HomeServerLeaseSigner
 {
-    public function __construct(
-        private readonly string $signingKey,
-        private readonly string $keyId = 'homeserver-hs256-v1'
-    ) {
+    private readonly bool $legacyHmacMode;
+    private readonly string $privateKeyBase64;
+    private readonly string $publicKeyBase64;
+    private readonly string $keyId;
+
+    /**
+     * The three-argument form is the production Ed25519 contract.
+     * The two-argument form remains available only for retained pre-Phase-13 tests and non-production migration compatibility.
+     */
+    public function __construct(string $privateKeyOrLegacySecret, string $publicKeyOrLegacyKeyId, ?string $keyId = null)
+    {
+        $this->legacyHmacMode = $keyId === null;
+        if ($this->legacyHmacMode) {
+            $this->privateKeyBase64 = $privateKeyOrLegacySecret;
+            $this->publicKeyBase64 = '';
+            $this->keyId = $publicKeyOrLegacyKeyId;
+            return;
+        }
+        $this->privateKeyBase64 = $privateKeyOrLegacySecret;
+        $this->publicKeyBase64 = $publicKeyOrLegacyKeyId;
+        $this->keyId = (string) $keyId;
     }
 
-    /** @param array<string,mixed> $claims @return array{document:string,signature:string,key_id:string,document_hash:string,signature_hash:string} */
+    /** @param array<string,mixed> $claims @return array{document:string,signature:string,key_id:string,algorithm:string,document_hash:string,signature_hash:string} */
     public function sign(array $claims): array
     {
-        $this->assertConfigured();
         $document = $this->canonicalJson($claims);
-        $signature = $this->base64Url(hash_hmac('sha256', $document, $this->signingKey, true));
-        return [
-            'document' => $this->base64Url($document),
-            'signature' => $signature,
-            'key_id' => $this->keyId,
-            'document_hash' => hash('sha256', $document),
-            'signature_hash' => hash('sha256', $signature),
-        ];
+        if ($this->legacyHmacMode) {
+            if (strlen($this->privateKeyBase64) < 32) {
+                throw new RuntimeException('Legacy HomeServer lease signing requires a 32-byte key.');
+            }
+            $signature = $this->base64Url(hash_hmac('sha256', $document, $this->privateKeyBase64, true));
+            return $this->result($document, $signature, 'HS256');
+        }
+
+        $this->assertSodium();
+        $private = base64_decode($this->privateKeyBase64, true);
+        if (!is_string($private) || strlen($private) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
+            throw new RuntimeException('A valid Ed25519 HomeServer lease signing private key is required.');
+        }
+        $signature = $this->base64Url(sodium_crypto_sign_detached($document, $private));
+        return $this->result($document, $signature, 'Ed25519');
     }
 
     public function verify(string $document, string $signature): bool
     {
-        $this->assertConfigured();
         $decoded = $this->base64UrlDecode($document);
         if ($decoded === null) {
             return false;
         }
-        $expected = $this->base64Url(hash_hmac('sha256', $decoded, $this->signingKey, true));
-        return hash_equals($expected, $signature);
+        if ($this->legacyHmacMode) {
+            if (strlen($this->privateKeyBase64) < 32) {
+                return false;
+            }
+            return hash_equals(
+                $this->base64Url(hash_hmac('sha256', $decoded, $this->privateKeyBase64, true)),
+                $signature
+            );
+        }
+
+        $this->assertSodium();
+        $public = base64_decode($this->publicKeyBase64, true);
+        $signatureBytes = $this->base64UrlDecode($signature);
+        if (!is_string($public) || strlen($public) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES
+            || $signatureBytes === null || strlen($signatureBytes) !== SODIUM_CRYPTO_SIGN_BYTES) {
+            return false;
+        }
+        return sodium_crypto_sign_verify_detached($signatureBytes, $decoded, $public);
     }
 
     public function keyId(): string
@@ -45,10 +83,28 @@ final class HomeServerLeaseSigner
         return $this->keyId;
     }
 
-    private function assertConfigured(): void
+    public function algorithm(): string
     {
-        if (strlen($this->signingKey) < 32) {
-            throw new RuntimeException('HomeServer lease signing is unavailable until a 32-byte signing key is configured.');
+        return $this->legacyHmacMode ? 'HS256' : 'Ed25519';
+    }
+
+    /** @return array{document:string,signature:string,key_id:string,algorithm:string,document_hash:string,signature_hash:string} */
+    private function result(string $document, string $signature, string $algorithm): array
+    {
+        return [
+            'document' => $this->base64Url($document),
+            'signature' => $signature,
+            'key_id' => $this->keyId,
+            'algorithm' => $algorithm,
+            'document_hash' => hash('sha256', $document),
+            'signature_hash' => hash('sha256', $signature),
+        ];
+    }
+
+    private function assertSodium(): void
+    {
+        if (!function_exists('sodium_crypto_sign_detached')) {
+            throw new RuntimeException('The sodium extension is required for Ed25519 HomeServer leases.');
         }
     }
 

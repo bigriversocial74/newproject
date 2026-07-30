@@ -20,8 +20,10 @@ $read = static function (string $path) use ($root): string {
 $service = $read('src/HomeServers/HomeServerControlPlaneService.php');
 $endpoint = $read('src/Http/HomeServerEndpoint.php');
 $migration = $read('database/migrations/20260729_phase12_homeserver_control_plane.sql');
+$cutoverMigration = $read('database/migrations/20260729_phase13_homeserver_cutover_contract.sql');
 $installer = $read('database/vp3-single-install.sql');
 $download = $read('public/api/homeserver/v1/installer-download.php');
+$catalog = $read('src/Releases/ReleaseCatalogService.php');
 
 foreach ([
     'registerDevice', 'activateDevice', 'heartbeat', 'refreshLease', 'latestRelease',
@@ -50,7 +52,13 @@ $assert(str_contains($migration, 'token_hash CHAR(64)'), 'Installer grant token 
 $assert(str_contains($migration, "status ENUM('active','consumed','expired','revoked')"), 'Installer grant lifecycle is incomplete.');
 $assert(str_contains($migration, 'homeserver_transfer_requests'), 'HomeServer transfer schema is missing.');
 $assert(str_contains($migration, 'homeserver_update_receipts_v1'), 'HomeServer update receipt schema is missing.');
+$assert(str_contains($cutoverMigration, 'authenticode_thumbprint'), 'Phase 13 Authenticode trust metadata migration is missing.');
+$assert(str_contains($cutoverMigration, 'file_name'), 'Phase 13 canonical installer filename migration is missing.');
+$assert(str_contains($catalog, 'HomeServer release artifacts require a valid Authenticode signer thumbprint.'), 'HomeServer release Authenticode enforcement is missing.');
+$assert(str_contains($catalog, "'authenticode_thumbprint'"), 'Authenticode thumbprint is omitted from the signed release manifest.');
+$assert(str_contains($catalog, "'file_name'"), 'Canonical installer filename is omitted from the signed release manifest.');
 $assert(str_contains($installer, '20260729_phase12_homeserver_control_plane.sql'), 'Cumulative installer omits Phase 12.');
+$assert(str_contains($installer, '20260729_phase13_homeserver_cutover_contract.sql'), 'Cumulative installer omits Phase 13.');
 $assert(str_contains($download, "str_contains(\$reference, '..')"), 'Installer traversal rejection is missing.');
 $assert(str_contains($download, "preg_match('#^[a-z]+://#i'"), 'Remote installer URL rejection is missing.');
 $assert(str_contains($download, "hash_file('sha256'"), 'Installer SHA-256 verification is missing.');

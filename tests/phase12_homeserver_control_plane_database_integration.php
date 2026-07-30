@@ -204,6 +204,7 @@ try {
         $productId = $catalog->ensureProduct('homeserver', 'VP3 HomeServer', 'homeserver');
     }
     $version = '12.0.' . (string) random_int(1000, 9999);
+    $thumbprint = strtoupper(hash('sha256', 'phase12-authenticode-' . $token));
     $draft = $catalog->createDraftRelease(
         $productId,
         $version,
@@ -211,8 +212,10 @@ try {
         [[
             'platform' => 'windows',
             'architecture' => 'x86_64',
-            'storage_reference' => 'homeserver/' . $version . '/VP3-HomeServer.exe',
+            'storage_reference' => 'homeserver/' . $version . '/Microgifter-HomeServer-Setup.exe',
+            'file_name' => 'Microgifter-HomeServer-Setup.exe',
             'sha256' => hash('sha256', 'phase12-installer-' . $token),
+            'authenticode_thumbprint' => $thumbprint,
             'size_bytes' => 4096,
         ]],
         ['minimum_current_version' => '0.1.0', 'database_family' => 'any'],
@@ -223,6 +226,12 @@ try {
     );
     $published = $catalog->publishRelease($draft['release_id'], 'REQ-P12-PUBLISH-' . strtoupper($token));
     $assert($manifestSigner->verify($published['manifest'], $published['signature']), 'Published release manifest signature failed verification.');
+    $document = base64_decode(strtr($published['manifest'], '-_', '+/'), true);
+    $manifest = is_string($document) ? json_decode($document, true, 512, JSON_THROW_ON_ERROR) : null;
+    $signedArtifact = is_array($manifest) ? ($manifest['artifacts'][0] ?? null) : null;
+    $assert(is_array($signedArtifact), 'Published HomeServer artifact is missing from the signed manifest.');
+    $assert(($signedArtifact['file_name'] ?? null) === 'Microgifter-HomeServer-Setup.exe', 'Canonical HomeServer installer filename is not signed.');
+    $assert(($signedArtifact['authenticode_thumbprint'] ?? null) === $thumbprint, 'Authenticode signer thumbprint is not signed.');
 
     $available = $control->latestRelease(
         $registration['device_public_id'],
