@@ -52,12 +52,12 @@ $exists = static function (string $publicId) use ($pdo): bool {
 try {
     $suffix = strtoupper(bin2hex(random_bytes(6)));
     $now = gmdate('Y-m-d H:i:s');
-    $outerKept = 'VP3-P21-NEST-KEEP-' . $suffix;
-    $innerRolledBack = 'VP3-P21-NEST-INNER-' . $suffix;
-    $outerRolledBack = 'VP3-P21-NEST-OUTER-' . $suffix;
-    $innerRolledBackWithOuter = 'VP3-P21-NEST-OUTER-INNER-' . $suffix;
-    $successOuter = 'VP3-P21-NEST-SUCCESS-' . $suffix;
-    $successInner = 'VP3-P21-NEST-SUCCESS-INNER-' . $suffix;
+    $outerKept = 'P21N-' . $suffix . '-OK';
+    $innerRolledBack = 'P21N-' . $suffix . '-IR';
+    $outerRolledBack = 'P21N-' . $suffix . '-OR';
+    $innerRolledBackWithOuter = 'P21N-' . $suffix . '-OI';
+    $successOuter = 'P21N-' . $suffix . '-SO';
+    $successInner = 'P21N-' . $suffix . '-SI';
 
     $insert = static function (PDO $connection, string $publicId, string $now): void {
         $connection->prepare(
