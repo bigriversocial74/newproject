@@ -18,10 +18,16 @@ $read = static function (string $path) use ($root): string {
 };
 
 $service = $read('src/HomeServers/HomeServerFleetQueryService.php');
+$options = $read('src/HomeServers/HomeServerRegistrationOptionsService.php');
 $endpoint = $read('public/api/homeserver/v1/fleet.php');
+$optionsEndpoint = $read('public/api/homeserver/v1/registration-options.php');
+$page = $read('public/homeservers.php');
+$client = $read('public/assets/homeserver-fleet.js');
+$transferClient = $read('public/assets/homeserver-transfer-accept.js');
 
 $assert(str_contains($endpoint, "HomeServerEndpoint::requireMethod('POST')"), 'Fleet endpoint is not POST-only.');
 $assert(str_contains($endpoint, 'HomeServerEndpoint::accountContext'), 'Fleet endpoint does not enforce authenticated account ownership and CSRF.');
+$assert(str_contains($optionsEndpoint, 'HomeServerEndpoint::accountContext'), 'Registration options are not account authenticated.');
 $assert(str_contains($service, 'WHERE d.account_id=:account'), 'Fleet query is not account scoped.');
 $assert(str_contains($service, 'homeserver_entitlement_leases'), 'Fleet response omits lease evidence.');
 $assert(str_contains($service, 'homeserver_update_receipts_v1'), 'Fleet response omits update receipt evidence.');
@@ -31,6 +37,19 @@ $assert(!str_contains($service, 'code_hash'), 'Fleet service exposes or queries 
 $assert(!str_contains($service, 'token_hash'), 'Fleet service exposes or queries an installer grant token hash.');
 $assert(!str_contains($service, "'device_fingerprint' =>"), 'Fleet response exposes the device fingerprint.');
 $assert(str_contains($service, "'event_count_24h'"), 'Fleet response does not bound operational event counts to the recent window.');
+$assert(str_contains($options, "hs.status<>'revoked'"), 'Eligible-license query does not exclude occupied licenses.');
+$assert(str_contains($options, "l.product_type='homeserver'"), 'Eligible-license query can return non-HomeServer licenses.');
+$assert(str_contains($page, "role IN ('owner','administrator')"), 'Fleet page does not require an owner or administrator role.');
+$assert(str_contains($page, "header('Cache-Control: no-store')"), 'Fleet page does not disable response caching.');
+$assert(str_contains($client, '/api/homeserver/v1/register.php'), 'Fleet client cannot register a HomeServer.');
+$assert(str_contains($client, '/api/homeserver/v1/replace.php'), 'Fleet client cannot replace a HomeServer.');
+$assert(str_contains($client, '/api/homeserver/v1/transfer-request.php'), 'Fleet client cannot request a transfer.');
+$assert(str_contains($transferClient, '/api/homeserver/v1/transfer-accept.php'), 'Fleet client cannot accept a transfer.');
+$assert(str_contains($client, 'oneTimeBundle'), 'Registration and replacement credentials are not treated as one-time values.');
+$assert(str_contains($transferClient, 'Transferred HomeServer activation bundle'), 'Transfer credentials are not presented through a one-time activation flow.');
+$assert(!str_contains($client, 'localStorage') && !str_contains($client, 'sessionStorage'), 'Fleet client persists one-time activation data in browser storage.');
+$assert(!str_contains($transferClient, 'localStorage') && !str_contains($transferClient, 'sessionStorage'), 'Transfer client persists one-time activation data in browser storage.');
+$assert(!str_contains($page, '$exception->getMessage()'), 'Fleet authentication page leaks internal exception messages.');
 
 if ($failures !== []) {
     fwrite(STDERR, implode("\n", $failures) . "\n");
