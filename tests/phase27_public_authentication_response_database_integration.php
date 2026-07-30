@@ -61,6 +61,12 @@ try {
     $assert(is_array($public) && str_starts_with((string) $public['account_public_id'], 'VP3-'), 'Registration public account identity is unavailable.');
     $assert(is_array($public) && str_starts_with((string) $public['user_public_id'], 'USR-'), 'Registration public user identity is unavailable.');
 
+    $verifiedAt = gmdate('Y-m-d H:i:s');
+    $pdo->prepare("UPDATE users SET status='active',email_verified_at=?,updated_at=? WHERE id=?")
+        ->execute([$verifiedAt, $verifiedAt, (int) $registered['user_id']]);
+    $pdo->prepare("UPDATE accounts SET status='active',updated_at=? WHERE id=?")
+        ->execute([$verifiedAt, (int) $registered['account_id']]);
+
     $sessions = new DatabaseSessionService($database, 1800, 86400, $audit);
     $created = $sessions->create((int) $registered['user_id'], '127.0.0.27', 'Phase27-Test-Agent');
     $rawCurrent = $sessions->validate((string) $created['token'], '127.0.0.27', 'Phase27-Test-Agent', false);
