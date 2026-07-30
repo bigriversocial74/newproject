@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Vp3\Auth\AuthPublicException;
 use Vp3\Http\ControlCenterEndpoint;
 use Vp3\Http\JsonResponse;
 
@@ -19,6 +20,9 @@ try {
     $requestId = ControlCenterEndpoint::requestId($payload);
     $user = $account['user'];
     if ($action === 'begin') {
+        if ($container['mfa']->status((int) $user['id'])['enabled']) {
+            throw new AuthPublicException('mfa_already_enabled', 'Disable the current MFA method before starting a new enrollment.', 409);
+        }
         JsonResponse::send(['data' => $container['mfa']->beginEnrollment(
             (int) $user['id'],
             (string) $user['email'],
