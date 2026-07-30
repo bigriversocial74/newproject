@@ -19,6 +19,7 @@ $read = static function (string $path) use ($root): string {
 
 $service = $read('src/HomeServers/HomeServerControlPlaneService.php');
 $endpoint = $read('src/Http/HomeServerEndpoint.php');
+$resolver = $read('src/ControlCenter/PublicAccountIdentityResolver.php');
 $migration = $read('database/migrations/20260729_phase12_homeserver_control_plane.sql');
 $cutoverMigration = $read('database/migrations/20260729_phase13_homeserver_cutover_contract.sql');
 $installer = $read('database/vp3-single-install.sql');
@@ -42,7 +43,10 @@ foreach ([
 $assert(str_contains($endpoint, 'MAX_JSON_BYTES = 65536'), 'HomeServer JSON body limit is missing.');
 $assert(str_contains($endpoint, 'Bearer\\s+'), 'Bearer device authentication is missing.');
 $assert(str_contains($endpoint, 'assertCsrf'), 'Account mutation CSRF enforcement is missing.');
-$assert(str_contains($endpoint, "role IN ('customer_owner','customer_admin')"), 'Current customer owner/administrator authorization is missing.');
+$assert(str_contains($endpoint, 'new PublicAccountIdentityResolver'), 'HomeServer browser endpoint bypasses the shared account authorization resolver.');
+$assert(str_contains($endpoint, "['customer_owner', 'customer_admin']"), 'HomeServer browser endpoint does not request the owner/administrator role policy.');
+$assert(str_contains($resolver, "'customer_owner', 'customer_admin', 'billing_manager', 'support_member'"), 'Current account role catalog is incomplete.');
+$assert(str_contains($resolver, "au.status='active'") && str_contains($resolver, "a.status='active'"), 'Current customer owner/administrator authorization does not require active membership and account state.');
 $assert(str_contains($service, "hash('sha256', \$token)"), 'Installer grant hashing is missing.');
 $assert(str_contains($service, 'function revokeSoftwareAuthority('), 'Software-only suspension revocation helper is missing.');
 $assert(str_contains($service, "\$this->revokeSoftwareAuthority(\$pdo, (int) \$device['id']);"), 'Suspension does not use the software-only authority boundary.');

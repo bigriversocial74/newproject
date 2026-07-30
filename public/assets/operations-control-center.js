@@ -4,7 +4,7 @@
   const root = document.querySelector('[data-control-center][data-page="operations"]');
   if (!root) return;
 
-  const accountId = Number(root.dataset.accountId || 0);
+  const accountPublicId = String(root.dataset.accountPublicId || '');
   const csrfToken = String(root.dataset.csrfToken || '');
   const notice = document.getElementById('operations-notice');
   const dialog = document.getElementById('operations-dialog');
@@ -35,7 +35,7 @@
     notice?.appendChild(node('div', `notice ${kind}`, message));
   };
   const post = async (path, payload = {}) => {
-    const finalPayload = { ...payload, account_id: accountId, csrf_token: csrfToken };
+    const finalPayload = { ...payload, account_public_id: accountPublicId, csrf_token: csrfToken };
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
     if (payload.request_id) headers['X-Request-ID'] = String(payload.request_id);
     const response = await fetch(path, {

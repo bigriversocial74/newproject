@@ -20,6 +20,7 @@ $shell = (string) @file_get_contents($root . '/src/ControlCenter/ControlCenterPa
 $client = (string) @file_get_contents($root . '/public/assets/billing-control-center.js');
 $action = (string) @file_get_contents($root . '/public/api/control-center/v1/billing-action.php');
 $query = (string) @file_get_contents($root . '/src/ControlCenter/AccountBillingQueryService.php');
+$endpoint = (string) @file_get_contents($root . '/src/Http/ControlCenterEndpoint.php');
 foreach (['Billing & Plans', '/billing.php', "'billing' =>"] as $needle) if (!str_contains($shell . $page, $needle)) $failures[] = 'Billing shell contract is missing: ' . $needle;
 foreach (['billing-overview.php', 'billing-action.php', 'checkout.stripe.com', 'billing.stripe.com'] as $needle) if (!str_contains($client . $action, $needle)) $failures[] = 'Billing action contract is missing: ' . $needle;
 foreach (['accountContext', 'requestId', 'idempotencyKey', 'base_url', 'trustedStripeRedirect'] as $needle) if (!str_contains($action, $needle)) $failures[] = 'Billing endpoint boundary is missing: ' . $needle;
@@ -32,7 +33,9 @@ if (!str_contains($client, "hasCurrentSubscription ? 'Add Another' : 'Choose Pla
 if (str_contains($client, 'button.disabled = currentPlans.has(item.public_id)')) $failures[] = 'An existing plan still disables repeat subscription checkout.';
 if (str_contains($page, '<script>') || str_contains($page, '<style') || str_contains($page, ' style=')) $failures[] = 'Billing page violates the external script/style CSP contract.';
 if (!str_contains($shell, "style-src 'self'") || !str_contains($shell, 'billing-control-center.css')) $failures[] = 'Shared shell does not retain the strict Billing CSP/style contract.';
-if (!str_contains($client, '{ ...payload, account_id: accountId, csrf_token: csrfToken }')) $failures[] = 'Billing client does not force account and CSRF identity after caller payload fields.';
+if (!str_contains($client, '{ ...payload, account_public_id: accountPublicId, csrf_token: csrfToken }')) $failures[] = 'Billing client does not force public account and CSRF identity after caller payload fields.';
+if (str_contains($client, 'account_id') || str_contains($client, 'dataset.accountId')) $failures[] = 'Billing client retains a numeric account identity.';
+if (!str_contains($endpoint, "array_key_exists('account_id', \$payload)") || !str_contains($endpoint, 'account_public_identity_required')) $failures[] = 'Billing endpoint boundary does not reject legacy numeric account payloads.';
 foreach (['Secure billing checkout could not be created.', 'The secure billing portal could not be opened.', 'The billing provider returned an untrusted redirect.'] as $safeMessage) if (!str_contains($action, $safeMessage)) $failures[] = 'Billing provider error sanitization is missing: ' . $safeMessage;
 if ($failures !== []) { fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL); exit(1); }
 echo "Phase 16 Billing and Plans control center contract passed.\n";

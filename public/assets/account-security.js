@@ -3,7 +3,7 @@
 
   const root = document.querySelector('[data-control-center][data-page="account-security"]');
   if (!root) return;
-  const accountId = Number(root.dataset.accountId || 0);
+  const accountPublicId = String(root.dataset.accountPublicId || '');
   const csrfToken = String(root.dataset.csrfToken || '');
   const notice = document.getElementById('security-notice');
   const dialog = document.getElementById('security-dialog');
@@ -29,7 +29,7 @@
   const statusClass = (value) => `status status-${String(value || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
   const showNotice = (message, kind = 'info') => { clear(notice); notice?.appendChild(node('div', `notice ${kind}`, message)); };
   const post = async (path, payload = {}, accountScoped = true) => {
-    const finalPayload = accountScoped ? { ...payload, account_id: accountId, csrf_token: csrfToken } : { ...payload, csrf_token: csrfToken };
+    const finalPayload = accountScoped ? { ...payload, account_public_id: accountPublicId, csrf_token: csrfToken } : { ...payload, csrf_token: csrfToken };
     const response = await fetch(path, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(finalPayload),

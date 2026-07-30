@@ -13,7 +13,7 @@
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-  const accountId = () => Number(accountSelect.value || root.dataset.accountId || 0);
+  const accountPublicId = () => String(accountSelect.value || root.dataset.accountPublicId || '');
   const requestId = () => `vp3-transfer-${crypto.randomUUID()}`;
   let licenses = [];
 
@@ -23,7 +23,7 @@
   stack.append(card);
 
   async function api(path, payload = {}) {
-    const body = { ...payload, account_id: accountId(), csrf_token: csrfToken };
+    const body = { ...payload, account_public_id: accountPublicId(), csrf_token: csrfToken };
     const response = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
@@ -49,7 +49,7 @@
   }
 
   function showBundle(bundle) {
-    const bundleAccountId = accountId();
+    const bundleAccountPublicId = String(bundle.account_public_id || accountPublicId());
     let modal = document.querySelector("#transfer-secret-modal");
     if (!modal) {
       modal = document.createElement("div");
@@ -58,9 +58,9 @@
       document.body.append(modal);
     }
     modal.hidden = false;
-    modal.innerHTML = `<div class="modal-card"><h3>Transferred HomeServer activation bundle</h3><p class="help">These rotated values are displayed once. Paste them into the transferred HomeServer's Control Center now.</p><div class="secret-grid"><div class="secret-row"><span>Account ID</span><code>${bundleAccountId}</code></div><div class="secret-row"><span>Device public ID</span><code>${escapeHtml(bundle.device_public_id)}</code></div><div class="secret-row"><span>Device credential</span><code>${escapeHtml(bundle.credential)}</code></div><div class="secret-row"><span>Enrollment code</span><code>${escapeHtml(bundle.enrollment_code)}</code></div></div><div class="modal-actions"><button id="copy-transfer-bundle" class="button primary" type="button">Copy Bundle</button><button id="close-transfer-bundle" class="button ghost" type="button">I Stored It</button></div></div>`;
+    modal.innerHTML = `<div class="modal-card"><h3>Transferred HomeServer activation bundle</h3><p class="help">These rotated values are displayed once. Paste them into the transferred HomeServer's Control Center now.</p><div class="secret-grid"><div class="secret-row"><span>Account public ID</span><code>${escapeHtml(bundleAccountPublicId)}</code></div><div class="secret-row"><span>Device public ID</span><code>${escapeHtml(bundle.device_public_id)}</code></div><div class="secret-row"><span>Device credential</span><code>${escapeHtml(bundle.credential)}</code></div><div class="secret-row"><span>Enrollment code</span><code>${escapeHtml(bundle.enrollment_code)}</code></div></div><div class="modal-actions"><button id="copy-transfer-bundle" class="button primary" type="button">Copy Bundle</button><button id="close-transfer-bundle" class="button ghost" type="button">I Stored It</button></div></div>`;
     modal.querySelector("#copy-transfer-bundle")?.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(JSON.stringify({ account_id: bundleAccountId, device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify({ account_public_id: bundleAccountPublicId, device_public_id: bundle.device_public_id, credential: bundle.credential, enrollment_code: bundle.enrollment_code }, null, 2));
     });
     modal.querySelector("#close-transfer-bundle")?.addEventListener("click", () => {
       modal.innerHTML = "";

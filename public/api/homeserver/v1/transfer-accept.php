@@ -16,6 +16,8 @@ try {
         (int) ($payload['target_license_id'] ?? 0),
         HomeServerEndpoint::requestId($payload)
     );
+    unset($result['license_id']);
+    $result['account_public_id'] = $account['account_public_id'];
     JsonResponse::send(['data' => $result]);
 } catch (Throwable $exception) {
     HomeServerEndpoint::sendException($exception);

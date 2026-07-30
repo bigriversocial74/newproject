@@ -8,6 +8,7 @@ use JsonException;
 use RuntimeException;
 use Throwable;
 use Vp3\Auth\AuthPublicException;
+use Vp3\ControlCenter\PublicAccountIdentityResolver;
 
 final class HomeServerEndpoint
 {
@@ -69,28 +70,27 @@ final class HomeServerEndpoint
         return $value;
     }
 
-    /** @return array{account_id:int,user:array<string,mixed>,session:array<string,mixed>} */
+    /** @return array{account_id:int,account_public_id:string,user:array<string,mixed>,session:array<string,mixed>} */
     public static function accountContext(array $container, array $payload): array
     {
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
-        $requestedAccountId = max(0, (int) ($payload['account_id'] ?? 0));
-        $sql = "SELECT account_id FROM account_users WHERE user_id=:user AND status='active'
-                AND role IN ('customer_owner','customer_admin')";
-        $parameters = ['user' => (int) $current['user']['id']];
-        if ($requestedAccountId > 0) {
-            $sql .= ' AND account_id=:account';
-            $parameters['account'] = $requestedAccountId;
+        if (array_key_exists('account_id', $payload)) {
+            throw new AuthPublicException(
+                'account_public_identity_required',
+                'Use the public VP3 account identity for HomeServer Control Center requests.',
+                400
+            );
         }
-        $sql .= ' ORDER BY account_id LIMIT 1';
-        $membership = $container['database']->pdo()->prepare($sql);
-        $membership->execute($parameters);
-        $accountId = (int) $membership->fetchColumn();
-        if ($accountId < 1) {
-            throw new RuntimeException('An active VP3 customer owner or administrator membership is required.');
-        }
+        $resolver = new PublicAccountIdentityResolver($container['database']);
+        $resolved = $resolver->resolve(
+            (int) $current['user']['id'],
+            isset($payload['account_public_id']) ? (string) $payload['account_public_id'] : null,
+            ['customer_owner', 'customer_admin']
+        );
         return [
-            'account_id' => $accountId,
+            'account_id' => $resolved['account_id'],
+            'account_public_id' => $resolved['account_public_id'],
             'user' => $current['user'],
             'session' => $current['session'],
         ];
