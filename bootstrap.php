@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 use Vp3\Auth\AccountSecurityService;
 use Vp3\Auth\AuthenticationContext;
 use Vp3\Auth\AuthAuditService;
@@ -37,6 +36,8 @@ use Vp3\Licensing\LicenseLifecycleService;
 use Vp3\Operations\OperationalAuditService;
 use Vp3\Operations\OperationalIncidentService;
 use Vp3\Operations\OperationalNotificationService;
+use Vp3\Operations\OperationsControlCenterActionService;
+use Vp3\Operations\OperationsControlCenterQueryService;
 use Vp3\Operations\OperationsMonitorService;
 use Vp3\Operations\OperationsReadinessService;
 use Vp3\Operations\OperationsSecretCipher;
@@ -154,6 +155,13 @@ $operationalNotifications = new OperationalNotificationService($database, $opera
 $operationalIncidents = new OperationalIncidentService($database, $operationalAudit, $operationalNotifications);
 $operationsMonitor = new OperationsMonitorService($database, $operationalIncidents, $operationalAudit, (int) ($operationsConfig['pod_offline_after_minutes'] ?? 10), (int) ($operationsConfig['homeserver_offline_after_minutes'] ?? 10));
 $operations = new OperationsReadinessService($database, $operationalAudit, $operationalNotifications, $operationalIncidents, $operationsMonitor);
+$operationsControlCenterQuery = new OperationsControlCenterQueryService($database);
+$operationsControlCenterActions = new OperationsControlCenterActionService(
+    $database,
+    $operationalAudit,
+    $operationalNotifications,
+    $operationsSecretCipher
+);
 
 return [
     'config' => $config,
@@ -204,5 +212,7 @@ return [
     'operational_incidents' => $operationalIncidents,
     'operations_monitor' => $operationsMonitor,
     'operations' => $operations,
+    'operations_control_center_query' => $operationsControlCenterQuery,
+    'operations_control_center_actions' => $operationsControlCenterActions,
     'session' => $session,
 ];
