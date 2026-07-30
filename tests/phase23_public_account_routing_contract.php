@@ -51,7 +51,8 @@ $assert(!str_contains($shell, 'data-account-id=') && !str_contains($shell, '?acc
 $assert(str_contains($homePage, 'data-account-public-id') && str_contains($homePage, '?account='), 'HomeServer page exposes numeric account routing.');
 $assert(!str_contains($homePage, 'data-account-id=') && !str_contains($homePage, '?account_id='), 'HomeServer page retains numeric account markup.');
 $assert(str_contains($shellClient, 'url.searchParams.set("account", picker.value)'), 'Account picker does not switch by public account identity.');
-$assert(!str_contains($shellClient, 'account_id'), 'Account picker retains numeric routing.');
+$assert(!str_contains($shellClient, 'url.searchParams.set("account_id"') && !str_contains($shellClient, 'url.searchParams.set("account_public_id"'), 'Account picker actively emits a legacy account route.');
+$assert(str_contains($shellClient, 'url.searchParams.delete("account_id")'), 'Account picker does not remove legacy numeric routing.');
 
 foreach ([$endpoint, $homeEndpoint] as $boundary) {
     $assert(str_contains($boundary, 'new PublicAccountIdentityResolver'), 'A browser API boundary bypasses the shared public account resolver.');
