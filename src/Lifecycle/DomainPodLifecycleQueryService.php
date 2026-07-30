@@ -112,6 +112,25 @@ final class DomainPodLifecycleQueryService
             ],
         ], $source['pods']);
 
+        $incidents = array_map(static fn (array $row): array => [
+            'public_id' => (string) $row['public_id'],
+            'severity' => (string) $row['severity'],
+            'status' => (string) $row['status'],
+            'source_type' => (string) $row['source_type'],
+            'title' => (string) $row['title'],
+            'occurrence_count' => (int) $row['occurrence_count'],
+            'first_detected_at' => (string) $row['first_detected_at'],
+            'last_detected_at' => (string) $row['last_detected_at'],
+        ], $source['incidents']);
+
+        $attention = array_map(static fn (array $row): array => [
+            'type' => (string) $row['type'],
+            'severity' => (string) $row['severity'],
+            'title' => (string) $row['title'],
+            'detail' => (string) $row['detail'],
+            'href' => (string) $row['href'],
+        ], $source['attention']);
+
         return [
             'account' => [
                 'public_id' => (string) $source['account']['public_id'],
@@ -125,11 +144,19 @@ final class DomainPodLifecycleQueryService
                 'pods_total' => (int) $source['metrics']['pods_total'],
                 'pods_active' => (int) $source['metrics']['pods_active'],
                 'pods_attention' => (int) $source['metrics']['pods_attention'],
+                'homeservers_total' => (int) $source['metrics']['homeservers_total'],
+                'homeservers_online' => (int) $source['metrics']['homeservers_online'],
+                'homeservers_attention' => (int) $source['metrics']['homeservers_attention'],
+                'subscriptions_active' => (int) $source['metrics']['subscriptions_active'],
+                'subscriptions_attention' => (int) $source['metrics']['subscriptions_attention'],
                 'open_incidents' => (int) $source['metrics']['open_incidents'],
+                'critical_incidents' => (int) $source['metrics']['critical_incidents'],
             ],
             'subscriptions' => $subscriptions,
             'domains' => $domains,
             'pods' => $pods,
+            'incidents' => $incidents,
+            'attention' => $attention,
             'generated_at' => (string) $source['generated_at'],
         ];
     }
