@@ -56,7 +56,7 @@ $assert(str_contains($deviceEndpoint, 'bearerCredential'), 'Device sync endpoint
 $assert(str_contains($deviceEndpoint, 'requestId'), 'Device sync endpoint does not require a request ID.');
 $assert(str_contains($deviceEndpoint, 'FederatedSettingsSigner'), 'Device sync response is not signed.');
 $assert(str_contains($browserEndpoint, 'accountContext'), 'Browser setting mutation is not account scoped.');
-$assert(str_contains($browserEndpoint, 'FederatedSettingsSigner') && str_contains($snapshotEndpoint, 'FederatedSettingsSigner'), 'Browser settings snapshots are not signed.');
+$assert(str_contains($browserEndpoint, 'FederatedSettingsControlCenterSigner') && str_contains($snapshotEndpoint, 'FederatedSettingsControlCenterSigner'), 'Browser settings snapshots are not signed by the public Control Center signer.');
 foreach ([$endpointBoundary, $settingsPage, $accountPageContext] as $roleBoundary) {
     $assert(str_contains($roleBoundary, 'customer_owner') && str_contains($roleBoundary, 'customer_admin'), 'A dashboard authorization boundary uses obsolete account roles.');
 }
@@ -109,4 +109,5 @@ if ($failures !== []) {
     fwrite(STDERR, implode("\n", $failures) . "\n");
     exit(1);
 }
+
 echo "Phase 15 federated settings contract passed.\n";

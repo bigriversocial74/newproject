@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 namespace Vp3\ControlCenter;
 
 use Vp3\Auth\AuthPublicException;
@@ -26,6 +25,7 @@ final class ControlCenterPage
                 'infrastructure' => ['/infrastructure.php', 'Infrastructure'],
                 'recovery' => ['/recovery.php', 'Recovery & Updates'],
                 'homeservers' => ['/homeservers.php', 'HomeServers'],
+                'settings' => ['/settings.php', 'Settings & Authority'],
                 'operations' => ['/operations.php', 'Operations'],
             ];
         } elseif ($role === 'billing_manager') {
@@ -48,6 +48,7 @@ final class ControlCenterPage
   <link rel="stylesheet" href="/assets/operations-control-center.css">
   <link rel="stylesheet" href="/assets/recovery-control-center.css">
   <link rel="stylesheet" href="/assets/infrastructure-control-center.css">
+  <link rel="stylesheet" href="/assets/federated-settings.css">
 </head>
 <body>
 <div class="app-shell">
