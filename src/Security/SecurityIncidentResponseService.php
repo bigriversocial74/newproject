@@ -47,19 +47,16 @@ final class SecurityIncidentResponseService
             $eventPublicId,
             $requestId
         ): array {
-            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES);
+            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES, true);
             $prior = $this->responseAction($pdo, $accountId, $requestId, 'promote_audit_event');
             if (is_array($prior)) {
-                $case = $prior['case_id'] === null ? null : $this->caseById($pdo, $accountId, (int) $prior['case_id']);
-                if (is_array($case) && (string) $prior['result'] === 'success') {
-                    return [
-                        'case_public_id' => (string) $case['public_id'],
-                        'incident_public_id' => (string) $case['incident_public_id'],
-                        'status' => (string) $case['case_status'],
-                        'replayed' => true,
-                    ];
+                $case = $prior['case_id'] === null
+                    ? null
+                    : $this->caseById($pdo, $accountId, (int) $prior['case_id']);
+                if (is_array($case) && in_array((string) $prior['result'], ['success', 'ignored'], true)) {
+                    return $this->promotionResult($case, true);
                 }
-                throw new AuthPublicException('security_response_replay_denied', 'The prior security response was not successful.', 409);
+                return ['error' => 'security_response_replay_denied', 'status' => 409];
             }
 
             $event = $pdo->prepare(
@@ -70,12 +67,32 @@ final class SecurityIncidentResponseService
             $event->execute(['public_id' => $eventPublicId, 'account_scope' => $accountId]);
             $eventRow = $event->fetch(PDO::FETCH_ASSOC);
             if (!is_array($eventRow)) {
-                $this->recordAction($pdo, $accountId, null, $actorUserId, null, $requestId, 'promote_audit_event', 'denied', hash('sha256', $eventPublicId . '|not_found'));
-                throw new AuthPublicException('security_event_invalid', 'The security event was not found.', 404);
+                $this->recordAction(
+                    $pdo,
+                    $accountId,
+                    null,
+                    $actorUserId,
+                    null,
+                    $requestId,
+                    'promote_audit_event',
+                    'denied',
+                    hash('sha256', $eventPublicId . '|not_found')
+                );
+                return ['error' => 'security_event_invalid', 'status' => 404];
             }
             if (!$this->qualifiesForIncident($eventRow)) {
-                $this->recordAction($pdo, $accountId, null, $actorUserId, null, $requestId, 'promote_audit_event', 'denied', hash('sha256', $eventPublicId . '|not_qualified'));
-                throw new AuthPublicException('security_event_not_escalatable', 'The security event does not meet the incident threshold.', 422);
+                $this->recordAction(
+                    $pdo,
+                    $accountId,
+                    null,
+                    $actorUserId,
+                    null,
+                    $requestId,
+                    'promote_audit_event',
+                    'denied',
+                    hash('sha256', $eventPublicId . '|not_qualified')
+                );
+                return ['error' => 'security_event_not_escalatable', 'status' => 422];
             }
 
             $existing = $pdo->prepare(
@@ -87,24 +104,26 @@ final class SecurityIncidentResponseService
             $existing->execute(['event_id' => (int) $eventRow['id'], 'account_scope' => $accountId]);
             $existingRow = $existing->fetch(PDO::FETCH_ASSOC);
             if (is_array($existingRow)) {
-                $evidenceHash = hash('sha256', $eventPublicId . '|already_promoted|' . (string) $existingRow['public_id']);
-                $this->recordAction($pdo, $accountId, (int) $existingRow['id'], $actorUserId, null, $requestId, 'promote_audit_event', 'ignored', $evidenceHash);
-                return [
-                    'case_public_id' => (string) $existingRow['public_id'],
-                    'incident_public_id' => (string) $existingRow['incident_public_id'],
-                    'status' => (string) $existingRow['case_status'],
-                    'replayed' => true,
-                ];
+                $this->recordAction(
+                    $pdo,
+                    $accountId,
+                    (int) $existingRow['id'],
+                    $actorUserId,
+                    null,
+                    $requestId,
+                    'promote_audit_event',
+                    'ignored',
+                    hash('sha256', $eventPublicId . '|already_promoted|' . (string) $existingRow['public_id'])
+                );
+                return $this->promotionResult($existingRow, true);
             }
 
-            $incidentSeverity = $this->incidentSeverity((string) $eventRow['risk_level']);
-            $title = mb_substr('Security incident: ' . (string) $eventRow['event_type'], 0, 190);
             $incident = $this->incidents->open(
                 $accountId,
                 'security_audit',
                 (int) $eventRow['id'],
-                $incidentSeverity,
-                $title,
+                $this->incidentSeverity((string) $eventRow['risk_level']),
+                mb_substr('Security incident: ' . (string) $eventRow['event_type'], 0, 190),
                 [
                     'audit_event_public_id' => $eventPublicId,
                     'event_type' => (string) $eventRow['event_type'],
@@ -134,8 +153,17 @@ final class SecurityIncidentResponseService
                 'updated_at' => $now,
             ]);
             $caseId = (int) $pdo->lastInsertId();
-            $evidenceHash = hash('sha256', implode('|', [$eventPublicId, $casePublicId, (string) $incident['public_id'], $requestId]));
-            $this->recordAction($pdo, $accountId, $caseId, $actorUserId, null, $requestId, 'promote_audit_event', 'success', $evidenceHash);
+            $this->recordAction(
+                $pdo,
+                $accountId,
+                $caseId,
+                $actorUserId,
+                null,
+                $requestId,
+                'promote_audit_event',
+                'success',
+                hash('sha256', implode('|', [$eventPublicId, $casePublicId, (string) $incident['public_id'], $requestId]))
+            );
 
             return [
                 'case_public_id' => $casePublicId,
@@ -144,6 +172,29 @@ final class SecurityIncidentResponseService
                 'replayed' => false,
             ];
         });
+
+        if (isset($result['error'])) {
+            $this->audit->record(
+                'security.incident.promotion_denied',
+                'platform',
+                'high',
+                'denied',
+                $accountId,
+                'account_user',
+                $actorUserId,
+                null,
+                'security_audit_event',
+                $eventPublicId,
+                ['reason' => (string) $result['error']],
+                $requestId
+            );
+            $message = $result['error'] === 'security_event_invalid'
+                ? 'The security event was not found.'
+                : ($result['error'] === 'security_event_not_escalatable'
+                    ? 'The security event does not meet the incident threshold.'
+                    : 'The prior security response was not successful.');
+            throw new AuthPublicException((string) $result['error'], $message, (int) $result['status']);
+        }
 
         $this->audit->record(
             'security.incident.promoted',
@@ -155,8 +206,12 @@ final class SecurityIncidentResponseService
             $actorUserId,
             null,
             'security_incident_case',
-            $result['case_public_id'],
-            ['source_event_public_id' => $eventPublicId, 'incident_public_id' => $result['incident_public_id']],
+            (string) $result['case_public_id'],
+            [
+                'source_event_public_id' => $eventPublicId,
+                'incident_public_id' => (string) $result['incident_public_id'],
+                'replayed' => (bool) $result['replayed'],
+            ],
             $requestId
         );
         return $result;
@@ -179,7 +234,7 @@ final class SecurityIncidentResponseService
             $assigneeUserPublicId,
             $requestId
         ): void {
-            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES);
+            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES, true);
             if (is_array($this->responseAction($pdo, $accountId, $requestId, 'assign_case'))) {
                 return;
             }
@@ -198,8 +253,10 @@ final class SecurityIncidentResponseService
             $now = $this->now();
             $pdo->prepare(
                 "UPDATE security_incident_cases
-                 SET assigned_user_id=:assignee,case_status=CASE WHEN case_status='triage' THEN 'investigating' ELSE case_status END,
-                     last_action_at=:last_action_at,updated_at=:updated_at
+                 SET assigned_user_id=:assignee,
+                     case_status=CASE WHEN case_status='triage' THEN 'investigating' ELSE case_status END,
+                     last_action_at=:last_action_at,
+                     updated_at=:updated_at
                  WHERE id=:id AND account_scope=:account_scope"
             )->execute([
                 'assignee' => (int) $assigneeRow['id'],
@@ -208,11 +265,33 @@ final class SecurityIncidentResponseService
                 'id' => (int) $case['id'],
                 'account_scope' => $accountId,
             ]);
-            $evidenceHash = hash('sha256', $casePublicId . '|' . (string) $assigneeRow['public_id'] . '|' . $requestId);
-            $this->recordAction($pdo, $accountId, (int) $case['id'], $actorUserId, (int) $assigneeRow['id'], $requestId, 'assign_case', 'success', $evidenceHash);
+            $this->recordAction(
+                $pdo,
+                $accountId,
+                (int) $case['id'],
+                $actorUserId,
+                (int) $assigneeRow['id'],
+                $requestId,
+                'assign_case',
+                'success',
+                hash('sha256', $casePublicId . '|' . (string) $assigneeRow['public_id'] . '|' . $requestId)
+            );
         });
 
-        $this->audit->record('security.incident.assigned', 'platform', 'medium', 'success', $accountId, 'account_user', $actorUserId, null, 'security_incident_case', $casePublicId, ['assignee_user_public_id' => $assigneeUserPublicId], $requestId);
+        $this->audit->record(
+            'security.incident.assigned',
+            'platform',
+            'medium',
+            'success',
+            $accountId,
+            'account_user',
+            $actorUserId,
+            null,
+            'security_incident_case',
+            $casePublicId,
+            ['assignee_user_public_id' => $assigneeUserPublicId],
+            $requestId
+        );
     }
 
     /** @return array{note_public_id:string,note_hash:string,created_at:string} */
@@ -238,7 +317,7 @@ final class SecurityIncidentResponseService
             $note,
             $requestId
         ): array {
-            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::RESPONDER_ROLES);
+            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::RESPONDER_ROLES, true);
             if (is_array($this->responseAction($pdo, $accountId, $requestId, 'add_note'))) {
                 throw new AuthPublicException('security_note_replayed', 'This security note request has already been processed.', 409);
             }
@@ -249,8 +328,10 @@ final class SecurityIncidentResponseService
 
             $notePublicId = 'SEC-NOTE-' . strtoupper(bin2hex(random_bytes(10)));
             $noteHash = hash('sha256', $note);
-            $context = implode('|', ['security-incident-note', $accountId, $casePublicId, $notePublicId]);
-            $encrypted = $this->cipher->encrypt($note, $context);
+            $encrypted = $this->cipher->encrypt(
+                $note,
+                implode('|', ['security-incident-note', $accountId, $casePublicId, $notePublicId])
+            );
             $now = $this->now();
             $pdo->prepare(
                 'INSERT INTO security_incident_notes
@@ -267,13 +348,43 @@ final class SecurityIncidentResponseService
                 'note_hash' => $noteHash,
                 'created_at' => $now,
             ]);
-            $pdo->prepare('UPDATE security_incident_cases SET last_action_at=:at,updated_at=:at WHERE id=:id')
-                ->execute(['at' => $now, 'id' => (int) $case['id']]);
-            $this->recordAction($pdo, $accountId, (int) $case['id'], $actorUserId, null, $requestId, 'add_note', 'success', hash('sha256', $notePublicId . '|' . $noteHash . '|' . $requestId));
+            $pdo->prepare(
+                'UPDATE security_incident_cases
+                 SET last_action_at=:last_action_at,updated_at=:updated_at
+                 WHERE id=:id'
+            )->execute([
+                'last_action_at' => $now,
+                'updated_at' => $now,
+                'id' => (int) $case['id'],
+            ]);
+            $this->recordAction(
+                $pdo,
+                $accountId,
+                (int) $case['id'],
+                $actorUserId,
+                null,
+                $requestId,
+                'add_note',
+                'success',
+                hash('sha256', $notePublicId . '|' . $noteHash . '|' . $requestId)
+            );
             return ['note_public_id' => $notePublicId, 'note_hash' => $noteHash, 'created_at' => $now];
         });
 
-        $this->audit->record('security.incident.note_added', 'platform', 'low', 'success', $accountId, 'account_user', $actorUserId, null, 'security_incident_case', $casePublicId, ['note_public_id' => $result['note_public_id'], 'note_hash' => $result['note_hash']], $requestId);
+        $this->audit->record(
+            'security.incident.note_added',
+            'platform',
+            'low',
+            'success',
+            $accountId,
+            'account_user',
+            $actorUserId,
+            null,
+            'security_incident_case',
+            $casePublicId,
+            ['note_public_id' => $result['note_public_id'], 'note_hash' => $result['note_hash']],
+            $requestId
+        );
         return $result;
     }
 
@@ -287,9 +398,37 @@ final class SecurityIncidentResponseService
         string $requestId
     ): int {
         $requestId = $this->requestId($requestId);
+        $targetUserPublicId = trim($targetUserPublicId);
+        $casePublicId = $casePublicId === null || trim($casePublicId) === '' ? null : trim($casePublicId);
+
+        $this->assertActor(
+            $this->database->pdo(),
+            $accountId,
+            $actorUserId,
+            $actorRole,
+            self::MANAGER_ROLES,
+            false
+        );
+        $prior = $this->responseAction(
+            $this->database->pdo(),
+            $accountId,
+            $requestId,
+            'emergency_revoke_sessions'
+        );
+        if (is_array($prior)) {
+            if ($this->emergencyReplayMatches($this->database->pdo(), $accountId, $prior, $targetUserPublicId, $casePublicId)) {
+                return 0;
+            }
+            throw new AuthPublicException(
+                'security_response_request_conflict',
+                'The request ID was already used for a different emergency response.',
+                409
+            );
+        }
+
         $context = [
-            'target_user_public_id' => trim($targetUserPublicId),
-            'case_public_id' => $casePublicId === null ? null : trim($casePublicId),
+            'target_user_public_id' => $targetUserPublicId,
+            'case_public_id' => $casePublicId,
         ];
         $this->reauthentication->consume(
             trim($reauthenticationPublicId),
@@ -307,24 +446,33 @@ final class SecurityIncidentResponseService
             $casePublicId,
             $requestId
         ): int {
-            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES);
+            $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES, true);
             $prior = $this->responseAction($pdo, $accountId, $requestId, 'emergency_revoke_sessions');
             if (is_array($prior)) {
-                return 0;
+                if ($this->emergencyReplayMatches($pdo, $accountId, $prior, $targetUserPublicId, $casePublicId)) {
+                    return 0;
+                }
+                throw new AuthPublicException(
+                    'security_response_request_conflict',
+                    'The request ID was already used for a different emergency response.',
+                    409
+                );
             }
+
             $target = $pdo->prepare(
                 "SELECT u.id,u.public_id
                  FROM users u INNER JOIN account_users au ON au.user_id=u.id
-                 WHERE u.public_id=:public_id AND au.account_id=:account_scope AND au.status='active' LIMIT 1 FOR UPDATE"
+                 WHERE u.public_id=:public_id AND au.account_id=:account_scope AND au.status='active'
+                 LIMIT 1 FOR UPDATE"
             );
-            $target->execute(['public_id' => trim($targetUserPublicId), 'account_scope' => $accountId]);
+            $target->execute(['public_id' => $targetUserPublicId, 'account_scope' => $accountId]);
             $targetRow = $target->fetch(PDO::FETCH_ASSOC);
             if (!is_array($targetRow)) {
                 throw new AuthPublicException('security_response_target_invalid', 'The target account user was not found.', 404);
             }
 
             $caseId = null;
-            if ($casePublicId !== null && trim($casePublicId) !== '') {
+            if ($casePublicId !== null) {
                 $case = $this->caseForUpdate($pdo, $accountId, $casePublicId);
                 $caseId = (int) $case['id'];
             }
@@ -338,8 +486,10 @@ final class SecurityIncidentResponseService
             $now = $this->nowSeconds();
             $update = $pdo->prepare(
                 "UPDATE auth_sessions
-                 SET revoked_at=:revoked_at,revocation_reason='security_incident_response',
-                     revoked_by_user_id=:actor_user_id,updated_at=:updated_at
+                 SET revoked_at=:revoked_at,
+                     revocation_reason='security_incident_response',
+                     revoked_by_user_id=:actor_user_id,
+                     updated_at=:updated_at
                  WHERE user_id=:target_user_id AND revoked_at IS NULL"
             );
             $update->execute([
@@ -349,37 +499,86 @@ final class SecurityIncidentResponseService
                 'target_user_id' => (int) $targetRow['id'],
             ]);
             $revokedCount = $update->rowCount();
-            $sessionEvidence = array_map(static fn (array $row): string => hash('sha256', (string) $row['session_public_id']), $sessionRows);
+            $sessionEvidence = array_map(
+                static fn (array $row): string => hash('sha256', (string) $row['session_public_id']),
+                $sessionRows
+            );
             sort($sessionEvidence, SORT_STRING);
             $evidenceHash = hash('sha256', json_encode([
                 'target_user_public_id' => (string) $targetRow['public_id'],
+                'case_public_id' => $casePublicId,
                 'revoked_count' => $revokedCount,
                 'session_evidence' => $sessionEvidence,
                 'request_id' => $requestId,
             ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
-            $this->recordAction($pdo, $accountId, $caseId, $actorUserId, (int) $targetRow['id'], $requestId, 'emergency_revoke_sessions', 'success', $evidenceHash);
+            $this->recordAction(
+                $pdo,
+                $accountId,
+                $caseId,
+                $actorUserId,
+                (int) $targetRow['id'],
+                $requestId,
+                'emergency_revoke_sessions',
+                'success',
+                $evidenceHash
+            );
             if ($caseId !== null) {
-                $pdo->prepare("UPDATE security_incident_cases SET case_status='contained',last_action_at=:at,updated_at=:at WHERE id=:id")
-                    ->execute(['at' => $this->now(), 'id' => $caseId]);
+                $containedAt = $this->now();
+                $pdo->prepare(
+                    "UPDATE security_incident_cases
+                     SET case_status='contained',last_action_at=:last_action_at,updated_at=:updated_at
+                     WHERE id=:id"
+                )->execute([
+                    'last_action_at' => $containedAt,
+                    'updated_at' => $containedAt,
+                    'id' => $caseId,
+                ]);
             }
             return $revokedCount;
         });
 
-        $this->audit->record('security.response.sessions_revoked', 'session', 'critical', 'success', $accountId, 'account_user', $actorUserId, null, 'user', trim($targetUserPublicId), ['case_public_id' => $casePublicId, 'revoked_count' => $count], $requestId);
+        $this->audit->record(
+            'security.response.sessions_revoked',
+            'session',
+            'critical',
+            'success',
+            $accountId,
+            'account_user',
+            $actorUserId,
+            null,
+            'user',
+            $targetUserPublicId,
+            ['case_public_id' => $casePublicId, 'revoked_count' => $count],
+            $requestId
+        );
         return $count;
     }
 
     /** @param list<string> $allowedRoles */
-    private function assertActor(PDO $pdo, int $accountId, int $actorUserId, string $actorRole, array $allowedRoles): void
-    {
-        $statement = $pdo->prepare(
-            "SELECT role FROM account_users
-             WHERE account_id=:account_id AND user_id=:user_id AND status='active' LIMIT 1 FOR UPDATE"
-        );
+    private function assertActor(
+        PDO $pdo,
+        int $accountId,
+        int $actorUserId,
+        string $actorRole,
+        array $allowedRoles,
+        bool $lock
+    ): void {
+        $sql = "SELECT role FROM account_users
+                WHERE account_id=:account_id AND user_id=:user_id AND status='active' LIMIT 1";
+        if ($lock) {
+            $sql .= ' FOR UPDATE';
+        }
+        $statement = $pdo->prepare($sql);
         $statement->execute(['account_id' => $accountId, 'user_id' => $actorUserId]);
         $storedRole = $statement->fetchColumn();
-        if (!is_string($storedRole) || !hash_equals($storedRole, $actorRole) || !in_array($storedRole, $allowedRoles, true)) {
-            throw new AuthPublicException('security_response_access_denied', 'An authorized active account membership is required.', 403);
+        if (!is_string($storedRole)
+            || !hash_equals($storedRole, $actorRole)
+            || !in_array($storedRole, $allowedRoles, true)) {
+            throw new AuthPublicException(
+                'security_response_access_denied',
+                'An authorized active account membership is required.',
+                403
+            );
         }
     }
 
@@ -406,7 +605,8 @@ final class SecurityIncidentResponseService
     {
         $statement = $pdo->prepare(
             'SELECT c.*,i.public_id AS incident_public_id
-             FROM security_incident_cases c INNER JOIN operational_incidents i ON i.id=c.operational_incident_id
+             FROM security_incident_cases c
+             INNER JOIN operational_incidents i ON i.id=c.operational_incident_id
              WHERE c.id=:id AND c.account_scope=:account_scope LIMIT 1'
         );
         $statement->execute(['id' => $caseId, 'account_scope' => $accountId]);
@@ -421,9 +621,46 @@ final class SecurityIncidentResponseService
             'SELECT * FROM security_response_actions
              WHERE account_scope=:account_scope AND request_id=:request_id AND action_type=:action_type LIMIT 1'
         );
-        $statement->execute(['account_scope' => $accountId, 'request_id' => $requestId, 'action_type' => $actionType]);
+        $statement->execute([
+            'account_scope' => $accountId,
+            'request_id' => $requestId,
+            'action_type' => $actionType,
+        ]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    /** @param array<string,mixed> $prior */
+    private function emergencyReplayMatches(
+        PDO $pdo,
+        int $accountId,
+        array $prior,
+        string $targetUserPublicId,
+        ?string $casePublicId
+    ): bool {
+        if ((string) ($prior['result'] ?? '') !== 'success' || $prior['target_user_id'] === null) {
+            return false;
+        }
+        $target = $pdo->prepare('SELECT public_id FROM users WHERE id=:id LIMIT 1');
+        $target->execute(['id' => (int) $prior['target_user_id']]);
+        $storedTarget = $target->fetchColumn();
+        if (!is_string($storedTarget) || !hash_equals($storedTarget, $targetUserPublicId)) {
+            return false;
+        }
+
+        if ($casePublicId === null) {
+            return $prior['case_id'] === null;
+        }
+        if ($prior['case_id'] === null) {
+            return false;
+        }
+        $case = $pdo->prepare(
+            'SELECT public_id FROM security_incident_cases
+             WHERE id=:id AND account_scope=:account_scope LIMIT 1'
+        );
+        $case->execute(['id' => (int) $prior['case_id'], 'account_scope' => $accountId]);
+        $storedCase = $case->fetchColumn();
+        return is_string($storedCase) && hash_equals($storedCase, $casePublicId);
     }
 
     private function recordAction(
@@ -453,6 +690,17 @@ final class SecurityIncidentResponseService
             'evidence_hash' => $evidenceHash,
             'created_at' => $this->now(),
         ]);
+    }
+
+    /** @param array<string,mixed> $case */
+    private function promotionResult(array $case, bool $replayed): array
+    {
+        return [
+            'case_public_id' => (string) $case['public_id'],
+            'incident_public_id' => (string) $case['incident_public_id'],
+            'status' => (string) $case['case_status'],
+            'replayed' => $replayed,
+        ];
     }
 
     /** @param array<string,mixed> $event */
