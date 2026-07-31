@@ -8,7 +8,7 @@ use RuntimeException;
 
 final class PlatformReleaseSignatureService
 {
-    private string $privateKey;
+    private ?string $privateKey;
     private string $publicKey;
 
     public function __construct(
@@ -41,6 +41,9 @@ final class PlatformReleaseSignatureService
         $manifestHash = (string) ($manifest['manifest_sha256'] ?? '');
         if (!preg_match('/^[a-f0-9]{64}$/', $manifestHash)) {
             throw new RuntimeException('A verified release manifest hash is required before signing.');
+        }
+        if (!is_string($this->privateKey)) {
+            throw new RuntimeException('The platform release signing private key is unavailable.');
         }
         $payload = $canonicalizer->canonicalJson($manifest);
         $signature = sodium_crypto_sign_detached($payload, $this->privateKey);
@@ -83,6 +86,8 @@ final class PlatformReleaseSignatureService
 
     public function __destruct()
     {
-        sodium_memzero($this->privateKey);
+        if (is_string($this->privateKey)) {
+            sodium_memzero($this->privateKey);
+        }
     }
 }
