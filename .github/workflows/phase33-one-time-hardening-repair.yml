@@ -1,0 +1,125 @@
+name: Phase 33 One-Time Closing Hardening Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase33-hardening-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply focused Phase 33 hardening repairs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  print(f'Already repaired or pattern absent: {path}')
+                  return
+              p.write_text(text.replace(old, new, 1))
+
+          replace(
+              'tools/vp3-deploy.php',
+              "try {\n    if (!in_array($command, ['preflight', 'manifest', 'install', 'upgrade', 'verify', 'rollback'], true)) {",
+              "$environment = 'development';\n\ntry {\n    if (!in_array($command, ['preflight', 'manifest', 'install', 'upgrade', 'verify', 'rollback'], true)) {"
+          )
+
+          replace(
+              'src/Deployment/PlatformUpgradeService.php',
+              "return $this->withLock(function (PDO $pdo) use ($requestId): array {\n            if (!$this->databaseIsEmpty($pdo)) {",
+              "return $this->withLock(function (PDO $pdo) use ($requestId): array {\n            $report = $this->preflight->inspect($pdo);\n            if (($report['ok'] ?? false) !== true) {\n                throw new RuntimeException('platform_install_preflight_failed:' . implode(',', (array) ($report['failures'] ?? [])));\n            }\n            if (!$this->databaseIsEmpty($pdo)) {"
+          )
+
+          old_baseline = """        foreach ($this->releases->migrationPaths() as $path) {
+            $mode = $path === 'migrations/20260731_phase33_production_deployment_upgrade.sql'
+                ? ($phase33Bootstrapped ? 'upgrade' : 'baseline')
+                : 'baseline';
+            $pdo->prepare(
+                'INSERT INTO platform_schema_migrations
+                 (migration_path,migration_sha256,applied_release_version,application_mode,applied_at)
+                 VALUES (:path,:sha,:release,:mode,:applied_at)'
+            )->execute([
+                'path' => $path,
+                'sha' => $this->releases->migrationSha256($path),
+                'release' => $releaseVersion,
+                'mode' => $mode,
+                'applied_at' => $this->now(),
+            ]);
+        }"""
+          new_baseline = """        $phase33Path = 'migrations/20260731_phase33_production_deployment_upgrade.sql';
+        foreach ($this->releases->migrationPaths() as $path) {
+            if ($path === $phase33Path && !$phase33Bootstrapped) {
+                break;
+            }
+            $mode = $path === $phase33Path ? 'upgrade' : 'baseline';
+            $pdo->prepare(
+                'INSERT INTO platform_schema_migrations
+                 (migration_path,migration_sha256,applied_release_version,application_mode,applied_at)
+                 VALUES (:path,:sha,:release,:mode,:applied_at)'
+            )->execute([
+                'path' => $path,
+                'sha' => $this->releases->migrationSha256($path),
+                'release' => $releaseVersion,
+                'mode' => $mode,
+                'applied_at' => $this->now(),
+            ]);
+            if ($path === $phase33Path) {
+                break;
+            }
+        }"""
+          replace('src/Deployment/PlatformUpgradeService.php', old_baseline, new_baseline)
+
+          replace(
+              'src/Deployment/InitialOwnerBootstrapService.php',
+              "            $pdo->query('SELECT GET_LOCK(\\'vp3-initial-owner-bootstrap\\',0)')->fetchColumn();\n            try {",
+              "            $lockAcquired = (int) $pdo->query('SELECT GET_LOCK(\\'vp3-initial-owner-bootstrap\\',0)')->fetchColumn();\n            if ($lockAcquired !== 1) {\n                throw new RuntimeException('initial_owner_bootstrap_lock_unavailable');\n            }\n            try {"
+          )
+
+          replace(
+              'src/Deployment/DeploymentHealthService.php',
+              "            'commit_sha' => (string) $release['commit_sha'],\n            'checked_at' => gmdate('Y-m-d H:i:s') . '.000000',\n            'checks' => $checks,",
+              "            'commit_sha' => (string) $release['commit_sha'],\n            'checks' => $checks,"
+          )
+          replace(
+              'src/Deployment/DeploymentHealthService.php',
+              "        $report['evidence_hash'] = $evidence;\n        return $report;",
+              "        $report['checked_at'] = gmdate('Y-m-d H:i:s') . '.000000';\n        $report['evidence_hash'] = $evidence;\n        return $report;"
+          )
+
+          replace(
+              'src/Deployment/PlatformReleaseSignatureService.php',
+              '    private string $privateKey;',
+              '    private ?string $privateKey;'
+          )
+          replace(
+              'src/Deployment/PlatformReleaseSignatureService.php',
+              "        $signature = sodium_crypto_sign_detached($payload, $this->privateKey);",
+              "        if (!is_string($this->privateKey)) {\n            throw new RuntimeException('The platform release signing private key is unavailable.');\n        }\n        $signature = sodium_crypto_sign_detached($payload, $this->privateKey);"
+          )
+          replace(
+              'src/Deployment/PlatformReleaseSignatureService.php',
+              "        sodium_memzero($this->privateKey);",
+              "        if (is_string($this->privateKey)) {\n            sodium_memzero($this->privateKey);\n        }"
+          )
+          PY
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add tools/vp3-deploy.php src/Deployment
+          git commit -m "Harden Phase 33 deployment and operator replay boundaries"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
