@@ -111,6 +111,12 @@ $removeTree = static function (string $path) use (&$removeTree): void {
 };
 
 $releaseConfig = require $root . '/config/release.php';
+$expectedManifest = new ReleaseManifestService($root, $releaseConfig);
+$expectedMigrationCount = count($expectedManifest->migrationPaths());
+$expectedReleaseVersion = (string) ($releaseConfig['version'] ?? '');
+if ($expectedMigrationCount < 24 || $expectedReleaseVersion === '') {
+    throw new RuntimeException('The current release identity is incomplete.');
+}
 $applicationConfig = static fn (array $databaseConfig): array => [
     'app' => ['env' => 'test', 'base_url' => 'https://vp3.test'],
     'database' => $databaseConfig,
@@ -174,17 +180,17 @@ try {
     }
     $installPdo = $installServices['database']->pdo();
     $migrationCount = (int) $installPdo->query('SELECT COUNT(*) FROM platform_schema_migrations')->fetchColumn();
-    if ($migrationCount !== 24) {
-        throw new RuntimeException('Clean installation did not register all 24 migrations.');
+    if ($migrationCount !== $expectedMigrationCount) {
+        throw new RuntimeException('Clean installation did not register every current migration.');
     }
     $activeRelease = (string) $installPdo->query(
         "SELECT release_version FROM platform_release_records WHERE release_status='active'"
     )->fetchColumn();
-    if ($activeRelease !== '33.0.0') {
-        throw new RuntimeException('Clean installation did not activate release 33.0.0.');
+    if (!hash_equals($expectedReleaseVersion, $activeRelease)) {
+        throw new RuntimeException('Clean installation did not activate the current release.');
     }
     $verifiedInstall = $installServices['service']->verify();
-    if (($verifiedInstall['release']['migration_count'] ?? 0) !== 24) {
+    if (($verifiedInstall['release']['migration_count'] ?? 0) !== $expectedMigrationCount) {
         throw new RuntimeException('Clean installation verification returned the wrong migration count.');
     }
 
@@ -221,7 +227,7 @@ try {
         throw new RuntimeException('Phase 32 to Phase 33 upgrade did not complete with a backup receipt.');
     }
     $upgradePdo = $upgradeServices['database']->pdo();
-    if ((int) $upgradePdo->query('SELECT COUNT(*) FROM platform_schema_migrations')->fetchColumn() !== 24) {
+    if ((int) $upgradePdo->query('SELECT COUNT(*) FROM platform_schema_migrations')->fetchColumn() !== $expectedMigrationCount) {
         throw new RuntimeException('Upgrade did not reconcile all migration checksums.');
     }
     $backup = $upgradePdo->query('SELECT * FROM platform_deployment_backups LIMIT 1')->fetch();
@@ -307,7 +313,7 @@ try {
     $releaseAfterRollback = (string) $upgradePdo->query(
         "SELECT release_version FROM platform_release_records WHERE release_status='active' ORDER BY id DESC LIMIT 1"
     )->fetchColumn();
-    if ($releaseAfterRollback !== '33.0.0') {
+    if (!hash_equals($expectedReleaseVersion, $releaseAfterRollback)) {
         throw new RuntimeException('Automatic rollback did not restore the prior active release.');
     }
     $journals = glob($backupRoot . '/PLATFORM-RUN-*.json') ?: [];

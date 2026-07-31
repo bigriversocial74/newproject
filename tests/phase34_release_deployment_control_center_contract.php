@@ -78,9 +78,9 @@ $assert(str_contains($releaseManifest, 'is_link'), 'Release source-tree hashing 
 
 $assert(str_contains($authorizer, 'platform_operator_accounts'), 'Release authority does not require an explicit platform-operator grant.');
 $assert(str_contains($authorizer, "po.operator_status='active'"), 'Revoked platform-operator grants remain usable.');
-foreach (['grant_platform_operator', 'revoke_platform_operator'] as $action) {
-    $assert(str_contains($grant, $action), 'Operator grant service is missing ' . $action . '.');
-}
+$assert(str_contains($grant, 'public function grant('), 'Operator grant service is missing its grant boundary.');
+$assert(str_contains($grant, 'public function revoke('), 'Operator grant service is missing its revocation boundary.');
+$assert(str_contains($grant, "'_platform_operator'"), 'Operator grant receipts are not action-specific.');
 $assert(str_contains($grantCli, 'GRANT_PLATFORM_OPERATOR'), 'Operator grants lack an explicit CLI confirmation boundary.');
 $assert(str_contains($grantCli, 'REVOKE_PLATFORM_OPERATOR'), 'Operator revocation lacks an explicit CLI confirmation boundary.');
 
@@ -97,7 +97,7 @@ $assert(str_contains($actions, 'requested_by_user_id'), 'Production approval doe
 $assert(str_contains($actions, 'platform.approve_release_promotion'), 'Production promotion does not consume action-bound reauthentication.');
 $assert(str_contains($actions, 'platform.rollback_release'), 'Rollback does not consume action-bound reauthentication.');
 $assert(str_contains($actions, 'approved_by_user_id'), 'Maintenance windows do not retain owner approval.');
-$assert(str_contains($actions, "environment_key='staging'"), 'Production promotion does not require staging evidence.');
+$assert(str_contains($actions, "hash_equals('staging'"), 'Production promotion does not require staging evidence.');
 $assert(str_contains($query, 'verifyEventChain'), 'Promotion event evidence is not chain verified.');
 $assert(str_contains($query, 'platform_release_promotion_steps'), 'Target deployment steps are not surfaced centrally.');
 
@@ -110,7 +110,7 @@ $assert(str_contains($worker, "'application_source'"), 'Release workers do not v
 $assert(str_contains($worker, 'recordTargetRun'), 'Target deployment and backup identities are not copied before health verification.');
 $assert(str_contains($worker, 'open('), 'Deployment failures do not escalate through Operations incidents.');
 
-$assert(str_contains($page, 'Release &amp; Deployments'), 'Release Control Center page is missing.');
+$assert(str_contains($page, "'Releases & Deployments'"), 'Release Control Center page is missing.');
 $assert(str_contains($page, 'config_fingerprint'), 'Environment configuration fingerprint is not required by the UI.');
 $assert(str_contains($endpoint, 'begin_promotion_reauthentication'), 'Production approval lacks a browser reauthentication start boundary.');
 $assert(str_contains($endpoint, 'queue_rollback'), 'Rollback is not exposed through the protected action endpoint.');
