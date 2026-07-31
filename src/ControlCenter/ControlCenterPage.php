@@ -26,6 +26,7 @@ final class ControlCenterPage
                 'infrastructure' => ['/infrastructure.php', 'Infrastructure'],
                 'recovery' => ['/recovery.php', 'Recovery & Updates'],
                 'releases' => ['/releases.php', 'Releases & Deployments'],
+                'reliability' => ['/reliability.php', 'Reliability & Status'],
                 'homeservers' => ['/homeservers.php', 'HomeServers'],
                 'settings' => ['/settings.php', 'Settings & Authority'],
                 'operations' => ['/operations.php', 'Operations'],
@@ -56,6 +57,7 @@ final class ControlCenterPage
   <link rel="stylesheet" href="/assets/federated-settings.css">
   <link rel="stylesheet" href="/assets/security-center.css">
   <link rel="stylesheet" href="/assets/release-deployment.css">
+  <link rel="stylesheet" href="/assets/reliability.css">
 </head>
 <body>
 <div class="app-shell">
