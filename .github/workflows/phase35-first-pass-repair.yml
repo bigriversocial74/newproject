@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-      - name: Repair retained identity and latency guard
+      - name: Repair retained identity, scrub assertion and latency guard
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -53,18 +53,31 @@ jobs:
           elif "$phase34Migration = 'migrations/20260731_phase34_release_deployment_control_center.sql';" not in text:
               raise SystemExit('Phase 34 future-safe identity anchor not found')
           contract.write_text(text)
+
+          phase35 = Path('tests/phase35_platform_reliability_slo_status_center_contract.php')
+          text = phase35.read_text()
+          old = '''$assert(str_contains($action, "unset(\\$row['account_scope']") && str_contains($action, "unset(\\$row['target_value']"), 'Reliability browser responses are not explicitly scrubbed.');'''
+          new = '''$assert(str_contains($action, "unset(\\$row['account_scope']")
+              && str_contains($action, "\\$row['target_value']")
+              && str_contains($action, "\\$row['target_hash']"), 'Reliability browser responses are not explicitly scrubbed.');'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "str_contains($action, \"\\$row['target_hash']\")" not in text:
+              raise SystemExit('Phase 35 scrub assertion anchor not found')
+          phase35.write_text(text)
           PY
           php -l src/Reliability/ReliabilityWorkerService.php
           php -l tests/phase34_release_deployment_control_center_contract.php
+          php -l tests/phase35_platform_reliability_slo_status_center_contract.php
           php tests/phase34_release_deployment_control_center_contract.php
           php tests/phase35_platform_reliability_slo_status_center_contract.php
           git diff --check
-          if git diff --quiet -- src/Reliability/ReliabilityWorkerService.php tests/phase34_release_deployment_control_center_contract.php; then
+          if git diff --quiet -- src/Reliability/ReliabilityWorkerService.php tests/phase34_release_deployment_control_center_contract.php tests/phase35_platform_reliability_slo_status_center_contract.php; then
             echo "Repair already applied."
             exit 0
           fi
           git config user.name "vp3-certification-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add src/Reliability/ReliabilityWorkerService.php tests/phase34_release_deployment_control_center_contract.php
-          git commit -m "Repair Phase 35 latency threshold and retained identity"
+          git add src/Reliability/ReliabilityWorkerService.php tests/phase34_release_deployment_control_center_contract.php tests/phase35_platform_reliability_slo_status_center_contract.php
+          git commit -m "Repair Phase 35 latency threshold and retained contracts"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
