@@ -37,7 +37,7 @@ $assert(str_contains($bootstrap, 'SELECT COUNT(*) FROM accounts'), 'Initial boot
 $assert(str_contains($bootstrap, 'SELECT COUNT(*) FROM users'), 'Initial bootstrap does not require an empty user table.');
 $assert(str_contains($bootstrap, "action_type='bootstrap_owner'"), 'Initial bootstrap lacks a replay-safe deployment receipt.');
 $assert(!str_contains($bootstrap, "'password' =>"), 'Initial owner plaintext password is persisted in a statement payload.');
-$assert(str_contains($bootstrapCli, "array_key_exists('password', $options)"), 'Owner bootstrap CLI does not reject command-line passwords.');
+$assert(str_contains($bootstrapCli, 'array_key_exists(\'password\', $options)'), 'Owner bootstrap CLI does not reject command-line passwords.');
 $assert(str_contains($bootstrapCli, 'VP3_BOOTSTRAP_OWNER_PASSWORD'), 'Owner bootstrap CLI lacks a protected environment secret path.');
 $assert(str_contains($bootstrapCli, 'stty -echo'), 'Owner bootstrap CLI does not hide interactive password input.');
 $assert(!str_contains($bootstrapCli, '--password='), 'Owner bootstrap CLI documents or accepts a password argument.');
