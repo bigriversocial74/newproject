@@ -453,7 +453,10 @@ final class ReliabilityWorkerService
             }
         }
         $latencyTarget = isset($probe['latency_target_ms']) ? (int) $probe['latency_target_ms'] : 0;
-        $latencyBreach = $latencyTarget > 0 && $latencyMs !== null && $latencyMs > $latencyTarget;
+        $latencyBreach = $observationStatus === 'success'
+            && $latencyTarget > 0
+            && $latencyMs !== null
+            && $latencyMs > $latencyTarget;
 
         if ($consecutiveFailures >= $failureThreshold) {
             return $budget['budget_status'] === 'exhausted' ? 'major_outage' : 'degraded';

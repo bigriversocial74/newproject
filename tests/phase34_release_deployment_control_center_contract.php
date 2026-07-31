@@ -68,10 +68,13 @@ $assert(str_contains($migration, 'lease_expires_at DATETIME(6)'), 'Promotion wor
 $assert(str_contains($migration, 'worker_id_hash CHAR(64)'), 'Promotion workers lack privacy-safe worker identities.');
 
 $entries = array_values(array_filter(array_map('trim', explode("\n", $manifest)), static fn (string $line): bool => $line !== '' && !str_starts_with($line, '#')));
-$assert(end($entries) === 'migrations/20260731_phase34_release_deployment_control_center.sql', 'Phase 34 is not the current installer tail.');
-foreach (["'format' => 'vp3-platform-release-v2'", "'version' => '34.0.0'", "'schema_level' => 34", "'migration_tail' => 'migrations/20260731_phase34_release_deployment_control_center.sql'"] as $identity) {
-    $assert(str_contains($release, $identity), 'Phase 34 release identity is missing ' . $identity . '.');
-}
+$phase34Migration = 'migrations/20260731_phase34_release_deployment_control_center.sql';
+$assert(in_array($phase34Migration, $entries, true), 'Phase 34 migration is missing from the ordered installer manifest.');
+$releaseConfig = require $root . '/config/release.php';
+$assert(($releaseConfig['format'] ?? null) === 'vp3-platform-release-v2', 'The platform release format no longer retains the Phase 34 signed-manifest contract.');
+$assert(version_compare((string) ($releaseConfig['version'] ?? '0.0.0'), '34.0.0', '>='), 'The current release identity predates Phase 34.');
+$assert((int) ($releaseConfig['schema_level'] ?? 0) >= 34, 'The current schema level predates Phase 34.');
+$assert(($releaseConfig['migration_tail'] ?? null) === end($entries), 'The current release migration tail does not match the ordered installer manifest.');
 $assert(str_contains($releaseManifest, "'application_source'"), 'Signed platform manifests omit the application source identity.');
 $assert(str_contains($releaseManifest, 'sourceDocuments'), 'Release source-tree hashing is not deterministic.');
 $assert(str_contains($releaseManifest, 'is_link'), 'Release source-tree hashing does not reject symlinks.');

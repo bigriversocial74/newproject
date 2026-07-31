@@ -46,7 +46,9 @@ $executor = $read('src/Reliability/ReliabilityProbeExecutor.php');
 $worker = $read('src/Reliability/ReliabilityWorkerService.php');
 $assert(str_contains($action, 'PlatformOperatorAuthorizer'), 'Reliability actions do not enforce platform operator authority.');
 $assert(str_contains($action, 'reliability_request_conflict'), 'Reliability request replay conflict detection is missing.');
-$assert(str_contains($action, "unset(\$row['account_scope']") && str_contains($action, "unset(\$row['target_value']"), 'Reliability browser responses are not explicitly scrubbed.');
+$assert(str_contains($action, "unset(\$row['account_scope']")
+    && str_contains($action, "\$row['target_value']")
+    && str_contains($action, "\$row['target_hash']"), 'Reliability browser responses are not explicitly scrubbed.');
 $assert(str_contains($query, "c.visibility='public'"), 'Public status visibility filtering is missing.');
 $assert(!str_contains($query, 'target_value'), 'Reliability query service exposes protected probe targets.');
 $assert(str_contains($query, 'deploymentCorrelation'), 'Release-to-reliability correlation is missing.');
