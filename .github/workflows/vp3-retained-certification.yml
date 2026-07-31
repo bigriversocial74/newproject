@@ -34,7 +34,7 @@ jobs:
         run: |
           find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
           for file in public/assets/*.js; do node --check "$file"; done
-      - name: Run retained Phase 2 through Phase 27 contracts
+      - name: Run retained Phase 2 through Phase 28 contracts
         run: |
           php tests/run.php
           php tests/phase3_contract.php
@@ -71,6 +71,7 @@ jobs:
           php tests/phase25_public_response_boundary_contract.php
           php tests/phase26_public_navigation_redirects_contract.php
           php tests/phase27_public_authentication_response_contract.php
+          php tests/phase28_auth_request_session_transport_contract.php
 
   mysql8:
     runs-on: ubuntu-latest
@@ -132,6 +133,7 @@ jobs:
           php tests/phase25_public_response_boundary_database_integration.php
           php tests/phase26_public_navigation_redirects_database_integration.php
           php tests/phase27_public_authentication_response_database_integration.php
+          php tests/phase28_auth_request_session_transport_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-latest
@@ -193,3 +195,4 @@ jobs:
           php tests/phase25_public_response_boundary_database_integration.php
           php tests/phase26_public_navigation_redirects_database_integration.php
           php tests/phase27_public_authentication_response_database_integration.php
+          php tests/phase28_auth_request_session_transport_database_integration.php
