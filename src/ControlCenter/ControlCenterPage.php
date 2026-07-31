@@ -28,6 +28,7 @@ final class ControlCenterPage
                 'homeservers' => ['/homeservers.php', 'HomeServers'],
                 'settings' => ['/settings.php', 'Settings & Authority'],
                 'operations' => ['/operations.php', 'Operations'],
+                'security-center' => ['/security-center.php', 'Security Center'],
             ];
         } elseif ($role === 'billing_manager') {
             $nav = ['billing' => ['/billing.php', 'Billing & Plans']];
@@ -52,6 +53,7 @@ final class ControlCenterPage
   <link rel="stylesheet" href="/assets/recovery-control-center.css">
   <link rel="stylesheet" href="/assets/infrastructure-control-center.css">
   <link rel="stylesheet" href="/assets/federated-settings.css">
+  <link rel="stylesheet" href="/assets/security-center.css">
 </head>
 <body>
 <div class="app-shell">
