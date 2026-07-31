@@ -1,0 +1,76 @@
+name: Cancel Stale Phase 27 Runs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/vp3-cancel-stale-phase27.yml
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: vp3-cancel-stale-phase27
+  cancel-in-progress: true
+
+jobs:
+  cancel-stale-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel obsolete Phase 27 workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          stale_heads=(
+            "97d27861595381a05e2a95d2073e4807cb90c3ed"
+            "4af8d631a7dd0c778ba07fb698fdf86bce731dbf"
+          )
+
+          for head_sha in "${stale_heads[@]}"; do
+            page=1
+            while true; do
+              response="$(curl --fail --silent --show-error \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${REPOSITORY}/actions/runs?head_sha=${head_sha}&event=pull_request&per_page=100&page=${page}")"
+
+              count="$(jq '.workflow_runs | length' <<<"${response}")"
+              if [[ "${count}" -eq 0 ]]; then
+                break
+              fi
+
+              mapfile -t run_ids < <(jq -r '
+                .workflow_runs[]
+                | select(
+                    .status == "queued"
+                    or .status == "pending"
+                    or .status == "waiting"
+                    or .status == "requested"
+                    or .status == "in_progress"
+                  )
+                | .id
+              ' <<<"${response}")
+
+              for run_id in "${run_ids[@]}"; do
+                echo "Cancelling stale run ${run_id} for ${head_sha}"
+                curl --fail --silent --show-error \
+                  -X POST \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "https://api.github.com/repos/${REPOSITORY}/actions/runs/${run_id}/cancel" \
+                  >/dev/null || true
+              done
+
+              if [[ "${count}" -lt 100 ]]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+          done
