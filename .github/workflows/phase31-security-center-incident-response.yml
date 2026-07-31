@@ -1,105 +1,21 @@
-name: Phase 31 Security Center and Incident Response
+name: Phase 31 Security Center and Incident Response (Retained)
 
 on:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: phase31-vp3-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  php:
+  retained:
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.2', '8.3']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Validate JavaScript syntax
-        run: for file in public/assets/*.js; do node --check "$file"; done
-      - name: Validate PHP ${{ matrix.php }} and focused contracts
+      - name: Run retained Phase 31 contract
         run: |
-          docker run --rm -v "$PWD:/app" -w /app php:${{ matrix.php }}-cli-bookworm sh -lc '
-            find src public tests config workers tools -name "*.php" -print0 | xargs -0 -n1 php -l &&
-            php tools/build-single-install.php &&
-            php tests/phase30_security_audit_hardening_contract.php &&
+          docker run --rm -v "$PWD:/app" -w /app php:8.3-cli-bookworm sh -lc '
+            php -l src/ControlCenter/SecurityCenterQueryService.php &&
+            php -l public/security-center.php &&
+            php -l public/api/control-center/v1/security-center-overview.php &&
             php tests/phase31_security_center_contract.php
           '
-      - name: Verify committed standalone installer
-        run: git diff --exit-code -- database/vp3-single-install.sql
-
-  mysql8:
-    runs-on: ubuntu-22.04
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: vp3_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install native PHP and MySQL client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mysql-client
-      - name: Verify and import standalone installer twice
-        run: |
-          php tools/build-single-install.php
-          git diff --exit-code -- database/vp3-single-install.sql
-          mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
-          mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run focused database and Security Center contracts
-        env:
-          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
-          VP3_TEST_DB_USER: root
-          VP3_TEST_DB_PASSWORD: root
-        run: |
-          php tests/phase30_security_audit_hardening_database_integration.php
-          php tests/phase31_security_center_contract.php
-
-  mariadb1011:
-    runs-on: ubuntu-22.04
-    services:
-      mariadb:
-        image: mariadb:10.11
-        env:
-          MARIADB_ROOT_PASSWORD: root
-          MARIADB_DATABASE: vp3_test
-        ports:
-          - 3307:3306
-        options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install native PHP and MariaDB client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mariadb-client
-      - name: Verify and import standalone installer twice
-        run: |
-          php tools/build-single-install.php
-          git diff --exit-code -- database/vp3-single-install.sql
-          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
-          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run focused database and Security Center contracts
-        env:
-          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
-          VP3_TEST_DB_USER: root
-          VP3_TEST_DB_PASSWORD: root
-        run: |
-          php tests/phase30_security_audit_hardening_database_integration.php
-          php tests/phase31_security_center_contract.php

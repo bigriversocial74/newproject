@@ -47,7 +47,8 @@ $assert(!str_contains($script, '.innerHTML'), 'The Security Center renders serve
 $assert(str_contains($script, '/api/control-center/v1/security-audit-export.php'), 'The Security Center omits the protected Phase 30 export boundary.');
 $assert(str_contains($style, '.security-posture'), 'The Security Center stylesheet omits posture presentation.');
 
-$assert(str_ends_with(trim($manifest), 'migrations/20260730_phase30_security_audit_hardening.sql'), 'Phase 31 unexpectedly changed the database manifest before adding a migration.');
+$assert(str_contains($manifest, 'migrations/20260730_phase30_security_audit_hardening.sql'), 'Phase 31 lost its certified Phase 30 database prerequisite.');
+$assert(!preg_match('/^migrations\/.*phase31.*\.sql$/mi', $manifest), 'Phase 31 unexpectedly introduced a database migration.');
 $assert(preg_match('/^\s*SOURCE\s+/mi', $installer) !== 1, 'The standalone SQL installer regressed to SOURCE directives.');
 
 if ($failures !== []) {

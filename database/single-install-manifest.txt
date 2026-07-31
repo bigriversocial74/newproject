@@ -21,3 +21,4 @@ migrations/20260729_phase13_homeserver_cutover_contract.sql
 migrations/20260730_phase15_federated_settings.sql
 migrations/20260730_phase17_account_team_security.sql
 migrations/20260730_phase30_security_audit_hardening.sql
+migrations/20260731_phase32_security_incident_automation.sql

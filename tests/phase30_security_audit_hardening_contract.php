@@ -36,7 +36,11 @@ $assert(count($manifestEntries) >= 22, 'The cumulative installer manifest does n
 foreach ($manifestEntries as $entry) {
     $assert(str_contains($installer, '-- BEGIN ' . $entry), 'The generated installer omits manifest entry ' . $entry . '.');
 }
-$assert(end($manifestEntries) === 'migrations/20260730_phase30_security_audit_hardening.sql', 'Phase 30 is not the final migration in the cumulative installer manifest.');
+$phase30Index = array_search('migrations/20260730_phase30_security_audit_hardening.sql', $manifestEntries, true);
+$assert(is_int($phase30Index), 'Phase 30 is missing from the cumulative installer manifest.');
+if (is_int($phase30Index)) {
+    $assert($phase30Index > 0, 'Phase 30 appears before its retained historical prerequisites.');
+}
 
 $requiredTables = [
     'security_audit_heads',

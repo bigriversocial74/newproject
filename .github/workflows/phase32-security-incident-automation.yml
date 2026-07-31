@@ -1,0 +1,123 @@
+name: Phase 32 Security Incident Automation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase32-vp3-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate JavaScript syntax
+        run: for file in public/assets/*.js; do node --check "$file"; done
+      - name: Validate PHP ${{ matrix.php }} and Phase 32 contracts
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app php:${{ matrix.php }}-cli-bookworm sh -lc '
+            find src public tests config workers tools -name "*.php" -print0 | xargs -0 -n1 php -l &&
+            php tools/build-single-install.php &&
+            grep -q "automatic_promotion_enabled TINYINT(1) NOT NULL DEFAULT 0" database/vp3-single-install.sql &&
+            ! grep -Eq "^[[:space:]]*SOURCE[[:space:]]" database/vp3-single-install.sql &&
+            php tests/phase30_security_audit_hardening_contract.php &&
+            php tests/phase31_security_center_contract.php &&
+            php tests/phase32_security_incident_automation_contract.php
+          '
+          git diff --exit-code -- database/vp3-single-install.sql
+      - name: Upload certified standalone installer
+        if: matrix.php == '8.3'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vp3-phase32-single-install
+          path: database/vp3-single-install.sql
+          if-no-files-found: error
+          retention-days: 7
+
+  mysql8:
+    runs-on: ubuntu-22.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: vp3_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native PHP and MySQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mysql-client
+      - name: Verify and import committed standalone installer twice
+        run: |
+          php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
+          grep -q "automatic_promotion_enabled TINYINT(1) NOT NULL DEFAULT 0" database/vp3-single-install.sql
+          ! grep -Eq "^[[:space:]]*SOURCE[[:space:]]" database/vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
+      - name: Run Phase 32 native database certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/phase30_security_audit_hardening_database_integration.php
+          php tests/phase32_security_incident_automation_database_integration.php
+          php tests/phase32_security_operations_database_integration.php
+          php tests/phase32_assignment_replay_database_integration.php
+
+  mariadb1011:
+    runs-on: ubuntu-22.04
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: vp3_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native PHP and MariaDB client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mariadb-client
+      - name: Verify and import committed standalone installer twice
+        run: |
+          php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
+          grep -q "automatic_promotion_enabled TINYINT(1) NOT NULL DEFAULT 0" database/vp3-single-install.sql
+          ! grep -Eq "^[[:space:]]*SOURCE[[:space:]]" database/vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
+      - name: Run Phase 32 native database certification
+        env:
+          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
+          VP3_TEST_DB_USER: root
+          VP3_TEST_DB_PASSWORD: root
+        run: |
+          php tests/phase30_security_audit_hardening_database_integration.php
+          php tests/phase32_security_incident_automation_database_integration.php
+          php tests/phase32_security_operations_database_integration.php
+          php tests/phase32_assignment_replay_database_integration.php

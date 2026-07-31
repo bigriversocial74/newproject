@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Vp3\Http\ControlCenterEndpoint;
 use Vp3\Http\JsonResponse;
+use Vp3\Security\SecurityAlertPreferenceService;
+use Vp3\Security\SecurityAuditService;
 use Vp3\Security\SecurityCenterQueryService;
 
 $container = require __DIR__ . '/_bootstrap.php';
@@ -21,15 +23,33 @@ try {
         ? $payload['filters']
         : [];
     $limit = isset($payload['limit']) ? (int) $payload['limit'] : 100;
+    $userId = (int) $account['user']['id'];
+    $role = (string) $account['role'];
 
-    $service = new SecurityCenterQueryService($container['database']);
-    JsonResponse::send(['data' => $service->snapshot(
+    $service = new SecurityCenterQueryService(
+        $container['database'],
+        $container['operations_secret_cipher']
+    );
+    $data = $service->snapshot(
         $account['account_id'],
-        (int) $account['user']['id'],
-        $account['role'],
+        $userId,
+        $role,
         $filters,
         $limit
-    )]);
+    );
+    $audit = new SecurityAuditService($container['database']);
+    $alerts = new SecurityAlertPreferenceService(
+        $container['database'],
+        $container['operational_incidents'],
+        $audit
+    );
+    $data['alert_preferences'] = $alerts->snapshot(
+        $account['account_id'],
+        $userId,
+        $role
+    );
+
+    JsonResponse::send(['data' => $data]);
 } catch (Throwable $exception) {
     ControlCenterEndpoint::sendException($exception);
 }

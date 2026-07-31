@@ -21,63 +21,61 @@ jobs:
         php: ['8.2', '8.3']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Validate Composer and runtime platform
+      - name: Validate Composer manifest
+        run: docker run --rm -v "$PWD:/app" -w /app composer:2 validate --strict --no-check-publish
+      - name: Validate PHP ${{ matrix.php }}, JavaScript and retained contracts
         run: |
-          composer validate --strict --no-check-publish
-          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
-      - name: Validate PHP and JavaScript syntax
-        run: |
-          find src public tests config workers tools -name '*.php' -print0 | xargs -0 -n1 php -l
           for file in public/assets/*.js; do node --check "$file"; done
+          docker run --rm -v "$PWD:/app" -w /app php:${{ matrix.php }}-cli-bookworm sh -lc '
+            apt-get update >/dev/null &&
+            apt-get install -y --no-install-recommends libonig-dev libzip-dev >/dev/null &&
+            docker-php-ext-install -j2 pdo_mysql mbstring zip >/dev/null &&
+            php -r '\''$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'\'' &&
+            find src public tests config workers tools -name "*.php" -print0 | xargs -0 -n1 php -l &&
+            php tools/build-single-install.php &&
+            php tests/run.php &&
+            php tests/phase3_contract.php &&
+            php tests/phase4_contract.php &&
+            php tests/phase5_contract.php &&
+            php tests/phase6_contract.php &&
+            php tests/phase7_contract.php &&
+            php tests/phase8_contract.php &&
+            php tests/phase9_contract.php &&
+            php tests/phase10_contract.php &&
+            php tests/phase11a_contract.php &&
+            php tests/phase11a_runtime.php &&
+            php tests/phase11b_contract.php &&
+            php tests/phase11b_runtime.php &&
+            php tests/phase11c_contract.php &&
+            php tests/phase11c_runtime.php &&
+            php tests/phase11c_extended_contract.php &&
+            php tests/phase11c_notifications_runtime.php &&
+            php tests/phase11c_update_contract.php &&
+            php tests/phase12_homeserver_control_plane_contract.php &&
+            php tests/phase13_homeserver_cutover_contract.php &&
+            php tests/phase14_homeserver_fleet_contract.php &&
+            php tests/phase15_control_center_contract.php &&
+            php tests/phase15_federated_settings_contract.php &&
+            php tests/phase16_billing_control_center_contract.php &&
+            php tests/phase17_account_team_security_contract.php &&
+            php tests/phase18_operations_control_center_contract.php &&
+            php tests/phase19_recovery_control_center_contract.php &&
+            php tests/phase20_infrastructure_control_center_contract.php &&
+            php tests/phase21_domain_pod_lifecycle_contract.php &&
+            php tests/phase22_federated_settings_control_center_contract.php &&
+            php tests/phase23_public_account_routing_contract.php &&
+            php tests/phase24_public_license_activation_contract.php &&
+            php tests/phase25_public_response_boundary_contract.php &&
+            php tests/phase26_public_navigation_redirects_contract.php &&
+            php tests/phase27_public_authentication_response_contract.php &&
+            php tests/phase28_auth_request_session_transport_contract.php &&
+            php tests/phase29_browser_request_integrity_contract.php &&
+            php tests/phase30_security_audit_hardening_contract.php &&
+            php tests/phase31_security_center_contract.php &&
+            php tests/phase32_security_incident_automation_contract.php
+          '
       - name: Verify committed standalone cumulative SQL installer
-        run: |
-          php tools/build-single-install.php
-          git diff --exit-code -- database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 30 contracts
-        run: |
-          php tests/run.php
-          php tests/phase3_contract.php
-          php tests/phase4_contract.php
-          php tests/phase5_contract.php
-          php tests/phase6_contract.php
-          php tests/phase7_contract.php
-          php tests/phase8_contract.php
-          php tests/phase9_contract.php
-          php tests/phase10_contract.php
-          php tests/phase11a_contract.php
-          php tests/phase11a_runtime.php
-          php tests/phase11b_contract.php
-          php tests/phase11b_runtime.php
-          php tests/phase11c_contract.php
-          php tests/phase11c_runtime.php
-          php tests/phase11c_extended_contract.php
-          php tests/phase11c_notifications_runtime.php
-          php tests/phase11c_update_contract.php
-          php tests/phase12_homeserver_control_plane_contract.php
-          php tests/phase13_homeserver_cutover_contract.php
-          php tests/phase14_homeserver_fleet_contract.php
-          php tests/phase15_control_center_contract.php
-          php tests/phase15_federated_settings_contract.php
-          php tests/phase16_billing_control_center_contract.php
-          php tests/phase17_account_team_security_contract.php
-          php tests/phase18_operations_control_center_contract.php
-          php tests/phase19_recovery_control_center_contract.php
-          php tests/phase20_infrastructure_control_center_contract.php
-          php tests/phase21_domain_pod_lifecycle_contract.php
-          php tests/phase22_federated_settings_control_center_contract.php
-          php tests/phase23_public_account_routing_contract.php
-          php tests/phase24_public_license_activation_contract.php
-          php tests/phase25_public_response_boundary_contract.php
-          php tests/phase26_public_navigation_redirects_contract.php
-          php tests/phase27_public_authentication_response_contract.php
-          php tests/phase28_auth_request_session_transport_contract.php
-          php tests/phase29_browser_request_integrity_contract.php
-          php tests/phase30_security_audit_hardening_contract.php
+        run: git diff --exit-code -- database/vp3-single-install.sql
 
   mysql8:
     runs-on: ubuntu-22.04
@@ -107,7 +105,7 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 30 database certification
+      - name: Run retained Phase 2 through Phase 32 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -141,6 +139,9 @@ jobs:
           php tests/phase28_auth_request_session_transport_database_integration.php
           php tests/phase29_browser_request_integrity_database_integration.php
           php tests/phase30_security_audit_hardening_database_integration.php
+          php tests/phase32_security_incident_automation_database_integration.php
+          php tests/phase32_security_operations_database_integration.php
+          php tests/phase32_assignment_replay_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-22.04
@@ -170,7 +171,7 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 30 database certification
+      - name: Run retained Phase 2 through Phase 32 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -204,3 +205,6 @@ jobs:
           php tests/phase28_auth_request_session_transport_database_integration.php
           php tests/phase29_browser_request_integrity_database_integration.php
           php tests/phase30_security_audit_hardening_database_integration.php
+          php tests/phase32_security_incident_automation_database_integration.php
+          php tests/phase32_security_operations_database_integration.php
+          php tests/phase32_assignment_replay_database_integration.php
