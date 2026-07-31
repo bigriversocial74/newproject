@@ -47,7 +47,11 @@ $assert(str_contains($migration, 'automatic_promotion_enabled TINYINT(1) NOT NUL
 $assert(str_contains($migration, 'idx_security_alert_automatic'), 'Automatic promotion policy lacks an efficient worker index.');
 $manifestEntries = array_values(array_filter(array_map('trim', explode("\n", $manifest)), static fn (string $line): bool => $line !== '' && !str_starts_with($line, '#')));
 $assert(str_contains($manifest, 'migrations/20260731_phase32_security_incident_automation.sql'), 'Phase 32 migration is absent from the standalone installer manifest.');
-$assert(end($manifestEntries) === 'migrations/20260731_phase32_security_incident_automation.sql', 'Phase 32 is not the current final migration in the standalone installer manifest.');
+$phase32Index = array_search('migrations/20260731_phase32_security_incident_automation.sql', $manifestEntries, true);
+$assert($phase32Index !== false, 'Phase 32 migration is absent from the ordered installer manifest.');
+if ($phase32Index !== false && isset($manifestEntries[$phase32Index + 1])) {
+    $assert($manifestEntries[$phase32Index + 1] === 'migrations/20260731_phase33_production_deployment_upgrade.sql', 'Phase 32 is not immediately followed by the Phase 33 deployment migration.');
+}
 
 $assert(str_contains($response, 'qualifiesForIncident'), 'Security event qualification is not centralized.');
 $assert(str_contains($response, "['high', 'critical']"), 'High and critical audit events are not incident eligible.');
