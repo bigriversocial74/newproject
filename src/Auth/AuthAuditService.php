@@ -63,7 +63,7 @@ final class AuthAuditService
 
             $this->securityAudit->record(
                 eventType: $eventType,
-                category: SecurityAuditService::categoryForEventType($eventType),
+                category: $this->categoryForEventType($eventType),
                 riskLevel: SecurityAuditService::riskFor($eventType, $normalizedResult),
                 result: $normalizedResult,
                 accountId: $accountId,
@@ -140,6 +140,18 @@ final class AuthAuditService
     public function requestId(): string
     {
         return 'REQ-' . strtoupper(bin2hex(random_bytes(12)));
+    }
+
+    private function categoryForEventType(string $eventType): string
+    {
+        $normalized = strtolower(trim($eventType));
+        if (str_starts_with($normalized, 'auth.mfa.') || str_starts_with($normalized, 'mfa.')) {
+            return 'mfa';
+        }
+        if (str_starts_with($normalized, 'auth.session.') || str_starts_with($normalized, 'session.')) {
+            return 'session';
+        }
+        return SecurityAuditService::categoryForEventType($normalized);
     }
 
     /** @param array<string,scalar|null> $metadata @return array<string,scalar|null> */
