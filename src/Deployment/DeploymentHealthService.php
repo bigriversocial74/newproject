@@ -118,7 +118,6 @@ final class DeploymentHealthService
             'ok' => $failures === [],
             'release_version' => (string) $release['version'],
             'commit_sha' => (string) $release['commit_sha'],
-            'checked_at' => gmdate('Y-m-d H:i:s') . '.000000',
             'checks' => $checks,
             'failures' => $failures,
         ];
@@ -151,6 +150,7 @@ final class DeploymentHealthService
             ]);
         });
 
+        $report['checked_at'] = gmdate('Y-m-d H:i:s') . '.000000';
         $report['evidence_hash'] = $evidence;
         return $report;
     }
