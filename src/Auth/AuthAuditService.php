@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Vp3\Auth;
 
 use DateTimeImmutable;
+use PDO;
 use Vp3\Database;
+use Vp3\Security\SecurityAuditService;
 
 final class AuthAuditService
 {
+    private readonly SecurityAuditService $securityAudit;
+
     public function __construct(private readonly Database $database)
     {
+        $this->securityAudit = new SecurityAuditService($database);
     }
 
     /** @param array<string,scalar|null> $metadata */
@@ -26,24 +31,52 @@ final class AuthAuditService
     ): string {
         $requestId ??= $this->requestId();
         $safeMetadata = $this->sanitize($metadata);
-        $statement = $this->database->pdo()->prepare(
-            'INSERT INTO audit_events
-             (request_id, actor_type, actor_id, account_id, event_type, resource_type, resource_public_id, result, metadata_json, created_at)
-             VALUES (:request_id, :actor_type, :actor_id, :account_id, :event_type, :resource_type, :resource_public_id, :result, :metadata_json, :created_at)'
-        );
-        $statement->execute([
-            'request_id' => $requestId,
-            'actor_type' => $actorId === null ? 'system' : 'user',
-            'actor_id' => $actorId,
-            'account_id' => $accountId,
-            'event_type' => $eventType,
-            'resource_type' => $resourceType,
-            'resource_public_id' => $resourcePublicId,
-            'result' => in_array($result, ['success', 'failure', 'denied'], true) ? $result : 'failure',
-            'metadata_json' => $safeMetadata === [] ? null : json_encode($safeMetadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
-            'created_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
-        ]);
-        return $requestId;
+
+        return $this->database->transaction(function (PDO $pdo) use (
+            $eventType,
+            $result,
+            $actorId,
+            $accountId,
+            $resourceType,
+            $resourcePublicId,
+            $safeMetadata,
+            $requestId
+        ): string {
+            $statement = $pdo->prepare(
+                'INSERT INTO audit_events
+                 (request_id, actor_type, actor_id, account_id, event_type, resource_type, resource_public_id, result, metadata_json, created_at)
+                 VALUES (:request_id, :actor_type, :actor_id, :account_id, :event_type, :resource_type, :resource_public_id, :result, :metadata_json, :created_at)'
+            );
+            $normalizedResult = in_array($result, ['success', 'failure', 'denied'], true) ? $result : 'failure';
+            $statement->execute([
+                'request_id' => $requestId,
+                'actor_type' => $actorId === null ? 'system' : 'user',
+                'actor_id' => $actorId,
+                'account_id' => $accountId,
+                'event_type' => $eventType,
+                'resource_type' => $resourceType,
+                'resource_public_id' => $resourcePublicId,
+                'result' => $normalizedResult,
+                'metadata_json' => $safeMetadata === [] ? null : json_encode($safeMetadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                'created_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
+            ]);
+
+            $this->securityAudit->record(
+                eventType: $eventType,
+                category: SecurityAuditService::categoryForEventType($eventType),
+                riskLevel: SecurityAuditService::riskFor($eventType, $normalizedResult),
+                result: $normalizedResult,
+                accountId: $accountId,
+                actorType: $actorId === null ? 'system' : 'user',
+                actorId: $actorId,
+                resourceType: $resourceType,
+                resourcePublicId: $resourcePublicId,
+                metadata: $safeMetadata,
+                requestId: $requestId
+            );
+
+            return $requestId;
+        });
     }
 
     /** @param array<string,scalar|null> $metadata */
@@ -58,22 +91,50 @@ final class AuthAuditService
     ): string {
         $requestId ??= $this->requestId();
         $safeMetadata = $this->sanitize($metadata);
-        $statement = $this->database->pdo()->prepare(
-            'INSERT INTO auth_session_events
-             (session_public_id, user_id, request_id, event_type, ip_hash, user_agent_hash, metadata_json, created_at)
-             VALUES (:session_public_id, :user_id, :request_id, :event_type, :ip_hash, :user_agent_hash, :metadata_json, :created_at)'
-        );
-        $statement->execute([
-            'session_public_id' => $sessionPublicId,
-            'user_id' => $userId,
-            'request_id' => $requestId,
-            'event_type' => $eventType,
-            'ip_hash' => $ip === '' ? null : hash('sha256', $ip),
-            'user_agent_hash' => $userAgent === '' ? null : hash('sha256', $userAgent),
-            'metadata_json' => $safeMetadata === [] ? null : json_encode($safeMetadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
-            'created_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
-        ]);
-        return $requestId;
+
+        return $this->database->transaction(function (PDO $pdo) use (
+            $eventType,
+            $sessionPublicId,
+            $userId,
+            $ip,
+            $userAgent,
+            $safeMetadata,
+            $requestId
+        ): string {
+            $statement = $pdo->prepare(
+                'INSERT INTO auth_session_events
+                 (session_public_id, user_id, request_id, event_type, ip_hash, user_agent_hash, metadata_json, created_at)
+                 VALUES (:session_public_id, :user_id, :request_id, :event_type, :ip_hash, :user_agent_hash, :metadata_json, :created_at)'
+            );
+            $statement->execute([
+                'session_public_id' => $sessionPublicId,
+                'user_id' => $userId,
+                'request_id' => $requestId,
+                'event_type' => $eventType,
+                'ip_hash' => $ip === '' ? null : hash('sha256', $ip),
+                'user_agent_hash' => $userAgent === '' ? null : hash('sha256', $userAgent),
+                'metadata_json' => $safeMetadata === [] ? null : json_encode($safeMetadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                'created_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
+            ]);
+
+            $securityResult = $eventType === 'rejected' ? 'denied' : ($eventType === 'expired' ? 'ignored' : 'success');
+            $this->securityAudit->record(
+                eventType: 'session.' . $eventType,
+                category: 'session',
+                riskLevel: SecurityAuditService::riskFor('session.' . $eventType, $securityResult),
+                result: $securityResult,
+                actorType: $userId === null ? 'system' : 'user',
+                actorId: $userId,
+                resourceType: 'session',
+                resourcePublicId: $sessionPublicId,
+                metadata: $safeMetadata,
+                requestId: $requestId,
+                ipAddress: $ip,
+                userAgent: $userAgent
+            );
+
+            return $requestId;
+        });
     }
 
     public function requestId(): string
