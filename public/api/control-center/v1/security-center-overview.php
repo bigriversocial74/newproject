@@ -22,7 +22,10 @@ try {
         : [];
     $limit = isset($payload['limit']) ? (int) $payload['limit'] : 100;
 
-    $service = new SecurityCenterQueryService($container['database']);
+    $service = new SecurityCenterQueryService(
+        $container['database'],
+        $container['operations_secret_cipher']
+    );
     JsonResponse::send(['data' => $service->snapshot(
         $account['account_id'],
         (int) $account['user']['id'],
