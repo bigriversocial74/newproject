@@ -1,0 +1,57 @@
+name: Phase 34 Worker Heartbeat Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase34-worker-heartbeat-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Repair no-op heartbeat handling
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('src/Deployment/ReleaseDeploymentWorkerService.php')
+          text = path.read_text()
+          old = """        if ($statement->rowCount() !== 1) {
+              throw new RuntimeException('The platform deployment environment is not registered or is disabled.');
+          }"""
+          new = """        if ($statement->rowCount() !== 1) {
+              $exists = $this->database->pdo()->prepare(
+                  \"SELECT COUNT(*) FROM platform_deployment_environments
+                   WHERE environment_key=:environment_key AND environment_status<>'disabled'\"
+              );
+              $exists->execute(['environment_key' => $environmentKey]);
+              if ((int) $exists->fetchColumn() !== 1) {
+                  throw new RuntimeException('The platform deployment environment is not registered or is disabled.');
+              }
+          }"""
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif '$exists = $this->database->pdo()->prepare(' not in text:
+              raise SystemExit('Heartbeat repair anchor not found')
+          path.write_text(text)
+          PY
+          php -l src/Deployment/ReleaseDeploymentWorkerService.php
+          git diff --check
+          if git diff --quiet -- src/Deployment/ReleaseDeploymentWorkerService.php; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/Deployment/ReleaseDeploymentWorkerService.php
+          git commit -m "Repair idempotent release worker heartbeat"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
