@@ -32,7 +32,9 @@ $endpoint = $read('public/api/control-center/v1/security-response-action.php');
 foreach (['security_incident_cases', 'security_incident_notes', 'security_alert_preferences', 'security_response_actions'] as $table) {
     $assert(str_contains($migration, 'CREATE TABLE IF NOT EXISTS ' . $table), 'Phase 32 migration is missing ' . $table . '.');
 }
+$manifestEntries = array_values(array_filter(array_map('trim', explode("\n", $manifest)), static fn (string $line): bool => $line !== '' && !str_starts_with($line, '#')));
 $assert(str_contains($manifest, 'migrations/20260731_phase32_security_incident_automation.sql'), 'Phase 32 migration is absent from the standalone installer manifest.');
+$assert(end($manifestEntries) === 'migrations/20260731_phase32_security_incident_automation.sql', 'Phase 32 is not the current final migration in the standalone installer manifest.');
 $assert(str_contains($response, 'qualifiesForIncident'), 'Security event qualification is not centralized.');
 $assert(str_contains($response, "['high', 'critical']"), 'High and critical audit events are not incident eligible.');
 $assert(str_contains($response, "['failure', 'denied']"), 'Failed and denied audit events are not incident eligible.');
