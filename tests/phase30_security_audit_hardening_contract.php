@@ -21,6 +21,7 @@ $installer = (string) file_get_contents($root . '/database/vp3-single-install.sq
 $manifest = (string) file_get_contents($root . '/database/single-install-manifest.txt');
 $migration = (string) file_get_contents($root . '/database/migrations/20260730_phase30_security_audit_hardening.sql');
 $service = (string) file_get_contents($root . '/src/Security/SecurityAuditService.php');
+$authAudit = (string) file_get_contents($root . '/src/Auth/AuthAuditService.php');
 
 $assert($installer !== '', 'The cumulative installer was not generated.');
 $assert(preg_match('/^\s*SOURCE\s+/mi', $installer) !== 1, 'The cumulative installer still depends on SOURCE directives.');
@@ -59,6 +60,11 @@ $assert(str_contains($service, 'BLOCKED_METADATA_KEYS'), 'The security audit ser
 $assert(str_contains($service, "'authorization'") && str_contains($service, "'cookie'") && str_contains($service, "'private_key'"), 'Required sensitive metadata classes are not redacted.');
 $assert(str_contains($service, 'JSON_PRESERVE_ZERO_FRACTION') && str_contains($service, 'ksort($value, SORT_STRING)'), 'Audit hashing is not based on deterministic canonical JSON.');
 $assert(str_contains($service, 'hashClientValue($ipAddress)') && str_contains($service, 'hashClientValue($userAgent)'), 'Client network and user-agent data are not privacy hashed.');
+
+$assert(str_contains($authAudit, 'new SecurityAuditService($database)'), 'Authentication auditing is not connected to the Phase 30 ledger.');
+$assert(substr_count($authAudit, '$this->securityAudit->record(') >= 2, 'Authentication and session events are not both bridged into the Phase 30 ledger.');
+$assert(str_contains($authAudit, '$this->database->transaction('), 'Legacy and Phase 30 authentication audit writes are not atomic.');
+$assert(str_contains($authAudit, "eventType: 'session.' . $eventType"), 'Session lifecycle events do not use the Phase 30 session namespace.');
 
 if ($failures !== []) {
     fwrite(STDERR, "Phase 30 security audit hardening contract failures:\n- " . implode("\n- ", $failures) . "\n");
