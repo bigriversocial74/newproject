@@ -1,0 +1,50 @@
+name: Phase 34 Rollback Fixture Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase34-rollback-fixture-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Repair Phase 33 rollback fixture
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/phase33_production_deployment_database_integration.php')
+          text = path.read_text()
+          old = """    @mkdir($failureRoot . '/database/migrations', 0700, true);
+              @mkdir($failureRoot . '/workers', 0700, true);"""
+          new = """    @mkdir($failureRoot . '/database/migrations', 0700, true);
+              foreach (['src', 'public', 'workers', 'tools'] as $sourceDirectory) {
+                  @mkdir($failureRoot . '/' . $sourceDirectory, 0700, true);
+              }"""
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "foreach (['src', 'public', 'workers', 'tools'] as $sourceDirectory)" not in text:
+              raise SystemExit('Rollback fixture anchor not found')
+          path.write_text(text)
+          PY
+          php -l tests/phase33_production_deployment_database_integration.php
+          git diff --check
+          if git diff --quiet -- tests/phase33_production_deployment_database_integration.php; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add tests/phase33_production_deployment_database_integration.php
+          git commit -m "Repair retained rollback source fixture"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
