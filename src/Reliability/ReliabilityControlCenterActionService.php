@@ -93,7 +93,8 @@ final class ReliabilityControlCenterActionService
                     'status_since' => $now,
                     'enabled' => $enabled ? 1 : 0,
                     'display_order' => $displayOrder,
-                    'actor_id' => $actorId,
+                    'created_by_user_id' => $actorId,
+                    'updated_by_user_id' => $actorId,
                     'created' => $now,
                     'updated' => $now,
                 ]);
@@ -333,7 +334,7 @@ final class ReliabilityControlCenterActionService
                     'INSERT INTO reliability_status_settings
                      (account_scope,public_slug,page_title,page_description,public_enabled,show_history,
                       created_by_user_id,updated_by_user_id,created_at,updated_at)
-                     VALUES (:account_id,:slug,:title,:description,:enabled,:history,:actor_id,:actor_id,:created,:updated)'
+                     VALUES (:account_id,:slug,:title,:description,:enabled,:history,:created_by_user_id,:updated_by_user_id,:created,:updated)'
                 )->execute([
                     'account_id' => $accountId,
                     'slug' => $publicSlug,
