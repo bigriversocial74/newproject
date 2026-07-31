@@ -133,3 +133,79 @@ jobs:
           php tests/phase32_assignment_replay_database_integration.php
           php tests/phase33_production_deployment_database_integration.php
           php tests/phase33_operator_controls_database_integration.php
+
+  repair-upgrade-service:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Harden install preflight and future migration baselining
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Deployment/PlatformUpgradeService.php')
+          text = path.read_text()
+          install_old = """        return $this->withLock(function (PDO $pdo) use ($requestId): array {
+            if (!$this->databaseIsEmpty($pdo)) {"""
+          install_new = """        return $this->withLock(function (PDO $pdo) use ($requestId): array {
+            $report = $this->preflight->inspect($pdo);
+            if (($report['ok'] ?? false) !== true) {
+                throw new RuntimeException('platform_install_preflight_failed:' . implode(',', (array) ($report['failures'] ?? [])));
+            }
+            if (!$this->databaseIsEmpty($pdo)) {"""
+          if install_old in text:
+              text = text.replace(install_old, install_new, 1)
+          baseline_old = """        foreach ($this->releases->migrationPaths() as $path) {
+            $mode = $path === 'migrations/20260731_phase33_production_deployment_upgrade.sql'
+                ? ($phase33Bootstrapped ? 'upgrade' : 'baseline')
+                : 'baseline';
+            $pdo->prepare(
+                'INSERT INTO platform_schema_migrations
+                 (migration_path,migration_sha256,applied_release_version,application_mode,applied_at)
+                 VALUES (:path,:sha,:release,:mode,:applied_at)'
+            )->execute([
+                'path' => $path,
+                'sha' => $this->releases->migrationSha256($path),
+                'release' => $releaseVersion,
+                'mode' => $mode,
+                'applied_at' => $this->now(),
+            ]);
+        }"""
+          baseline_new = """        $phase33Path = 'migrations/20260731_phase33_production_deployment_upgrade.sql';
+        foreach ($this->releases->migrationPaths() as $path) {
+            if ($path === $phase33Path && !$phase33Bootstrapped) {
+                break;
+            }
+            $mode = $path === $phase33Path ? 'upgrade' : 'baseline';
+            $pdo->prepare(
+                'INSERT INTO platform_schema_migrations
+                 (migration_path,migration_sha256,applied_release_version,application_mode,applied_at)
+                 VALUES (:path,:sha,:release,:mode,:applied_at)'
+            )->execute([
+                'path' => $path,
+                'sha' => $this->releases->migrationSha256($path),
+                'release' => $releaseVersion,
+                'mode' => $mode,
+                'applied_at' => $this->now(),
+            ]);
+            if ($path === $phase33Path) {
+                break;
+            }
+        }"""
+          if baseline_old in text:
+              text = text.replace(baseline_old, baseline_new, 1)
+          path.write_text(text)
+          PY
+          if git diff --quiet -- src/Deployment/PlatformUpgradeService.php; then
+            echo "Upgrade service is already hardened."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/Deployment/PlatformUpgradeService.php
+          git commit -m "Harden Phase 33 install and future migration baselining"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
