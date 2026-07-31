@@ -5,9 +5,7 @@ declare(strict_types=1);
 $root = dirname(__DIR__);
 $failures = [];
 $assert = static function (bool $condition, string $message) use (&$failures): void {
-    if (!$condition) {
-        $failures[] = $message;
-    }
+    if (!$condition) $failures[] = $message;
 };
 $read = static function (string $path) use ($root, &$failures): string {
     $absolute = $root . '/' . $path;
@@ -45,11 +43,20 @@ foreach ([
 $assert(str_contains($migration, 'UNIQUE KEY uq_platform_deployment_request'), 'Deployment request replay is not constrained.');
 $assert(str_contains($migration, 'file_path_hash CHAR(64)'), 'Backup paths are not represented by privacy-safe hashes.');
 $assert(str_contains($migration, "ENUM('install','upgrade','verify','rollback')"), 'Deployment operation states are incomplete.');
-$entries = array_values(array_filter(array_map('trim', explode("\n", $manifest)), static fn (string $line): bool => $line !== '' && !str_starts_with($line, '#')));
-$assert(end($entries) === 'migrations/20260731_phase33_production_deployment_upgrade.sql', 'Phase 33 is not the final installer migration.');
+$entries = array_values(array_filter(
+    array_map('trim', explode("\n", $manifest)),
+    static fn (string $line): bool => $line !== '' && !str_starts_with($line, '#')
+));
+$phase33 = array_search('migrations/20260731_phase33_production_deployment_upgrade.sql', $entries, true);
+$phase32 = array_search('migrations/20260731_phase32_security_incident_automation.sql', $entries, true);
+$assert($phase33 !== false, 'Phase 33 is missing from the cumulative installer manifest.');
+$assert($phase32 !== false && $phase33 > $phase32, 'Phase 33 no longer follows its Phase 32 prerequisite.');
 
-foreach (["'version' => '33.0.0'", "'schema_level' => 33", "'minimum_php' => '8.2.0'"] as $identity) {
-    $assert(str_contains($release, $identity), 'Release identity is missing ' . $identity . '.');
+$assert(str_contains($release, "'minimum_php' => '8.2.0'"), 'The retained minimum PHP release contract changed.');
+if (preg_match("/'schema_level'\\s*=>\\s*(\\d+)/", $release, $matches) === 1) {
+    $assert((int) $matches[1] >= 33, 'The current release schema level regressed below Phase 33.');
+} else {
+    $failures[] = 'The current release schema level could not be verified.';
 }
 $assert(str_contains($releaseService, 'manifest_sha256'), 'Release manifests are not self-identifying.');
 $assert(str_contains($releaseService, 'canonicalJson'), 'Release manifests are not canonicalized.');
@@ -66,7 +73,7 @@ $assert(str_contains($commands, "'MYSQL_PWD'"), 'Database passwords are not isol
 $assert(!str_contains($commands, '--password='), 'Database passwords are exposed on the process command line.');
 $assert(str_contains($commands, "'--single-transaction'"), 'Database backups are not transaction-consistent.');
 $assert(str_contains($commands, "'--add-drop-table'"), 'Database backups cannot replace prior tables during restore.');
-$assert(str_contains($commands, 'hash_file(\'sha256\''), 'Database backup checksums are not verified.');
+$assert(str_contains($commands, "hash_file('sha256'"), 'Database backup checksums are not verified.');
 $assert(str_contains($commands, 'DROP TABLE IF EXISTS'), 'Rollback does not remove post-backup schema additions.');
 $assert(str_contains($commands, '@chmod($path, 0600)'), 'Backup files are not restricted to the deployment user.');
 

@@ -18,6 +18,7 @@ final class DeploymentHealthService
         'workers/homeserver-monitor.php',
         'workers/operations.php',
         'workers/security-incidents.php',
+        'workers/platform-releases.php',
     ];
 
     public function __construct(
@@ -77,7 +78,8 @@ final class DeploymentHealthService
              FROM platform_deployment_runs ORDER BY id DESC LIMIT 1"
         )->fetch(PDO::FETCH_ASSOC);
         $checks['latest_deployment'] = [
-            'ok' => is_array($latestDeployment) && in_array((string) $latestDeployment['run_status'], ['completed', 'rolled_back'], true),
+            'ok' => is_array($latestDeployment)
+                && in_array((string) $latestDeployment['run_status'], ['completed', 'rolled_back'], true),
             'run' => is_array($latestDeployment) ? $latestDeployment : null,
         ];
 
@@ -105,7 +107,7 @@ final class DeploymentHealthService
             'ok' => $missingWorkers === [],
             'missing' => $missingWorkers,
             'sha256' => $workerHashes,
-            'scheduler_contract' => 'Run each worker through the production scheduler with one stable VP3_WORKER_ID.',
+            'scheduler_contract' => 'Run each worker through the production scheduler with one stable worker identity.',
         ];
 
         $failures = [];
