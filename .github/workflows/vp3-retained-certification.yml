@@ -12,6 +12,9 @@ concurrency:
   group: vp3-retained-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  VP3_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   php:
     runs-on: ubuntu-24.04
@@ -26,7 +29,7 @@ jobs:
       - name: Validate PHP ${{ matrix.php }}, JavaScript and retained contracts
         run: |
           for file in public/assets/*.js; do node --check "$file"; done
-          docker run --rm -v "$PWD:/app" -w /app php:${{ matrix.php }}-cli-bookworm sh -lc '
+          docker run --rm -e VP3_RELEASE_COMMIT="$VP3_RELEASE_COMMIT" -v "$PWD:/app" -w /app php:${{ matrix.php }}-cli-bookworm sh -lc '
             apt-get update >/dev/null &&
             apt-get install -y --no-install-recommends libonig-dev libzip-dev >/dev/null &&
             docker-php-ext-install -j2 pdo_mysql mbstring zip >/dev/null &&
@@ -72,13 +75,15 @@ jobs:
             php tests/phase29_browser_request_integrity_contract.php &&
             php tests/phase30_security_audit_hardening_contract.php &&
             php tests/phase31_security_center_contract.php &&
-            php tests/phase32_security_incident_automation_contract.php
+            php tests/phase32_security_incident_automation_contract.php &&
+            php tests/phase33_production_deployment_contract.php &&
+            php tests/phase33_operator_controls_contract.php
           '
       - name: Verify committed standalone cumulative SQL installer
         run: git diff --exit-code -- database/vp3-single-install.sql
 
   mysql8:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     services:
       mysql:
         image: mysql:8.0
@@ -91,7 +96,7 @@ jobs:
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=10
+          --health-retries=12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install native PHP and MySQL client
@@ -105,11 +110,13 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 32 database certification
+      - name: Run retained Phase 2 through Phase 33 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
           VP3_TEST_DB_PASSWORD: root
+          VP3_TEST_MYSQL_BINARY: /usr/bin/mysql
+          VP3_TEST_MYSQLDUMP_BINARY: /usr/bin/mysqldump
         run: |
           php tests/database-integration.php
           php tests/phase3_database_integration.php
@@ -142,9 +149,11 @@ jobs:
           php tests/phase32_security_incident_automation_database_integration.php
           php tests/phase32_security_operations_database_integration.php
           php tests/phase32_assignment_replay_database_integration.php
+          php tests/phase33_production_deployment_database_integration.php
+          php tests/phase33_operator_controls_database_integration.php
 
   mariadb1011:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     services:
       mariadb:
         image: mariadb:10.11
@@ -157,7 +166,7 @@ jobs:
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=10
+          --health-retries=12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install native PHP and MariaDB client
@@ -171,11 +180,13 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 32 database certification
+      - name: Run retained Phase 2 through Phase 33 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
           VP3_TEST_DB_PASSWORD: root
+          VP3_TEST_MYSQL_BINARY: /usr/bin/mariadb
+          VP3_TEST_MYSQLDUMP_BINARY: /usr/bin/mariadb-dump
         run: |
           php tests/database-integration.php
           php tests/phase3_database_integration.php
@@ -208,3 +219,5 @@ jobs:
           php tests/phase32_security_incident_automation_database_integration.php
           php tests/phase32_security_operations_database_integration.php
           php tests/phase32_assignment_replay_database_integration.php
+          php tests/phase33_production_deployment_database_integration.php
+          php tests/phase33_operator_controls_database_integration.php
