@@ -22,32 +22,36 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('src/Reliability/ReliabilityControlCenterActionService.php')
           text = path.read_text()
 
-          component_old = """                    'display_order' => $displayOrder,
-                    'created_by_user_id' => $actorId,
-                    'updated_by_user_id' => $actorId,
-                    'created' => $now,"""
-          component_new = """                    'display_order' => $displayOrder,
-                    'actor_id' => $actorId,
-                    'created' => $now,"""
-          if component_old in text:
-              text = text.replace(component_old, component_new, 1)
-          elif "'display_order' => $displayOrder,\n                    'actor_id' => $actorId," not in text:
+          component_pattern = re.compile(
+              r"('display_order'\s*=>\s*\$displayOrder,\s*)"
+              r"'created_by_user_id'\s*=>\s*\$actorId,\s*"
+              r"'updated_by_user_id'\s*=>\s*\$actorId,\s*"
+              r"('created'\s*=>\s*\$now,)",
+              re.MULTILINE,
+          )
+          if component_pattern.search(text):
+              text = component_pattern.sub(r"\1'actor_id' => $actorId,\n                    \2", text, count=1)
+          elif not re.search(r"'display_order'\s*=>\s*\$displayOrder,\s*'actor_id'\s*=>\s*\$actorId", text):
               raise SystemExit('Component binding anchor not found')
 
-          status_old = """                    'history' => $showHistory ? 1 : 0,
-                    'actor_id' => $actorId,
-                    'created' => $now,"""
-          status_new = """                    'history' => $showHistory ? 1 : 0,
-                    'created_by_user_id' => $actorId,
-                    'updated_by_user_id' => $actorId,
-                    'created' => $now,"""
-          if status_old in text:
-              text = text.replace(status_old, status_new, 1)
-          elif "'history' => $showHistory ? 1 : 0,\n                    'created_by_user_id' => $actorId," not in text:
+          status_pattern = re.compile(
+              r"('history'\s*=>\s*\$showHistory\s*\?\s*1\s*:\s*0,\s*)"
+              r"'actor_id'\s*=>\s*\$actorId,\s*"
+              r"('created'\s*=>\s*\$now,)",
+              re.MULTILINE,
+          )
+          if status_pattern.search(text):
+              text = status_pattern.sub(
+                  r"\1'created_by_user_id' => $actorId,\n                    'updated_by_user_id' => $actorId,\n                    \2",
+                  text,
+                  count=1,
+              )
+          elif not re.search(r"'history'\s*=>\s*\$showHistory\s*\?\s*1\s*:\s*0,\s*'created_by_user_id'\s*=>\s*\$actorId", text):
               raise SystemExit('Status settings binding anchor not found')
 
           path.write_text(text)
