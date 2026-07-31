@@ -136,9 +136,14 @@ $controlCenter = (string) @file_get_contents($root . '/src/Http/ControlCenterEnd
 $homeServer = (string) @file_get_contents($root . '/src/Http/HomeServerEndpoint.php');
 $controlBootstrap = (string) @file_get_contents($root . '/public/api/control-center/v1/_bootstrap.php');
 $homeServerBootstrap = (string) @file_get_contents($root . '/public/api/homeserver/v1/_bootstrap.php');
-$assert(str_contains($controlCenter, 'assertTrustedMutation($_SERVER, $requiredMethod)')
-    && strpos($controlCenter, 'assertTrustedMutation($_SERVER, $requiredMethod)') < strpos($controlCenter, 'public static function payload()'),
-    'Control Center request integrity is not enforced before payload parsing.');
+$controlRequirePosition = strpos($controlCenter, 'self::assertTrustedBrowserRequest($requiredMethod)');
+$controlPayloadPosition = strpos($controlCenter, 'public static function payload()');
+$assert($controlRequirePosition !== false
+    && $controlPayloadPosition !== false
+    && $controlRequirePosition < $controlPayloadPosition
+    && str_contains($controlCenter, "self::assertTrustedBrowserRequest(strtoupper((string) (\$_SERVER['REQUEST_METHOD'] ?? 'POST')))")
+    && str_contains($controlCenter, 'self::$requestIntegrity->assertTrustedMutation($_SERVER, $method)'),
+    'Control Center integrity is not enforced both before payload parsing and before account resolution.');
 $assert(str_contains($homeServer, 'public static function requireBrowserMethod(string $method)')
     && str_contains($homeServer, 'public static function requireMethod(string $method)')
     && str_contains($homeServer, 'self::$requestIntegrity->assertTrustedMutation($_SERVER, $method)'),
