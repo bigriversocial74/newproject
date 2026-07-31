@@ -40,10 +40,18 @@ final class SecurityIncidentResolutionService
             throw new \InvalidArgumentException('A valid security case, resolution summary, and request ID are required.');
         }
 
+        $resolutionHash = hash('sha256', $resolutionSummary);
         $this->assertManager($this->database->pdo(), $accountId, $actorUserId, $actorRole, false);
         $prior = $this->responseAction($this->database->pdo(), $accountId, $requestId);
         if (is_array($prior)) {
-            if ($this->replayMatches($this->database->pdo(), $accountId, $prior, $casePublicId)) {
+            if ($this->replayMatches(
+                $this->database->pdo(),
+                $accountId,
+                $prior,
+                $casePublicId,
+                $resolutionHash,
+                $requestId
+            )) {
                 return false;
             }
             throw new AuthPublicException(
@@ -55,7 +63,7 @@ final class SecurityIncidentResolutionService
 
         $context = [
             'case_public_id' => $casePublicId,
-            'resolution_hash' => hash('sha256', $resolutionSummary),
+            'resolution_hash' => $resolutionHash,
         ];
         $this->reauthentication->consume(
             trim($reauthenticationPublicId),
@@ -70,13 +78,20 @@ final class SecurityIncidentResolutionService
             $actorUserId,
             $actorRole,
             $casePublicId,
-            $resolutionSummary,
+            $resolutionHash,
             $requestId
         ): bool {
             $this->assertManager($pdo, $accountId, $actorUserId, $actorRole, true);
             $prior = $this->responseAction($pdo, $accountId, $requestId);
             if (is_array($prior)) {
-                if ($this->replayMatches($pdo, $accountId, $prior, $casePublicId)) {
+                if ($this->replayMatches(
+                    $pdo,
+                    $accountId,
+                    $prior,
+                    $casePublicId,
+                    $resolutionHash,
+                    $requestId
+                )) {
                     return false;
                 }
                 throw new AuthPublicException(
@@ -106,7 +121,13 @@ final class SecurityIncidentResolutionService
                     $actorUserId,
                     $requestId,
                     'ignored',
-                    hash('sha256', $casePublicId . '|already_resolved|' . $requestId)
+                    $this->resolutionEvidence(
+                        $casePublicId,
+                        (string) $case['incident_public_id'],
+                        $resolutionHash,
+                        $requestId,
+                        'ignored'
+                    )
                 );
                 return false;
             }
@@ -115,10 +136,10 @@ final class SecurityIncidentResolutionService
                 $accountId,
                 (int) $case['operational_incident_id'],
                 $actorUserId,
-                $requestId . '-OPS',
+                substr($requestId . '-OPS', 0, 80),
                 [
                     'security_case_public_id' => $casePublicId,
-                    'resolution_hash' => hash('sha256', $resolutionSummary),
+                    'resolution_hash' => $resolutionHash,
                 ]
             );
 
@@ -140,12 +161,13 @@ final class SecurityIncidentResolutionService
                 $actorUserId,
                 $requestId,
                 'success',
-                hash('sha256', implode('|', [
+                $this->resolutionEvidence(
                     $casePublicId,
                     (string) $case['incident_public_id'],
-                    hash('sha256', $resolutionSummary),
+                    $resolutionHash,
                     $requestId,
-                ]))
+                    'success'
+                )
             );
             return true;
         });
@@ -161,7 +183,7 @@ final class SecurityIncidentResolutionService
             null,
             'security_incident_case',
             $casePublicId,
-            ['resolution_hash' => hash('sha256', $resolutionSummary)],
+            ['resolution_hash' => $resolutionHash],
             $requestId
         );
         return $resolved;
@@ -196,17 +218,52 @@ final class SecurityIncidentResolutionService
     }
 
     /** @param array<string,mixed> $prior */
-    private function replayMatches(PDO $pdo, int $accountId, array $prior, string $casePublicId): bool
-    {
+    private function replayMatches(
+        PDO $pdo,
+        int $accountId,
+        array $prior,
+        string $casePublicId,
+        string $resolutionHash,
+        string $requestId
+    ): bool {
         if ($prior['case_id'] === null || !in_array((string) $prior['result'], ['success', 'ignored'], true)) {
             return false;
         }
         $statement = $pdo->prepare(
-            'SELECT public_id FROM security_incident_cases WHERE id=:id AND account_scope=:account LIMIT 1'
+            'SELECT c.public_id,i.public_id AS incident_public_id
+             FROM security_incident_cases c
+             INNER JOIN operational_incidents i ON i.id=c.operational_incident_id
+             WHERE c.id=:id AND c.account_scope=:account LIMIT 1'
         );
         $statement->execute(['id' => (int) $prior['case_id'], 'account' => $accountId]);
-        $stored = $statement->fetchColumn();
-        return is_string($stored) && hash_equals($stored, $casePublicId);
+        $case = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($case) || !hash_equals((string) $case['public_id'], $casePublicId)) {
+            return false;
+        }
+        $expected = $this->resolutionEvidence(
+            $casePublicId,
+            (string) $case['incident_public_id'],
+            $resolutionHash,
+            $requestId,
+            (string) $prior['result']
+        );
+        return hash_equals((string) $prior['evidence_hash'], $expected);
+    }
+
+    private function resolutionEvidence(
+        string $casePublicId,
+        string $incidentPublicId,
+        string $resolutionHash,
+        string $requestId,
+        string $result
+    ): string {
+        return hash('sha256', implode('|', [
+            $casePublicId,
+            $incidentPublicId,
+            $resolutionHash,
+            $requestId,
+            $result,
+        ]));
     }
 
     private function recordAction(
