@@ -20,7 +20,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Verify and unpack Phase 34 payload
         run: |
-          cat .phase34-payload/chunk-* | base64 -d > /tmp/phase34-payload.tgz
+          cat \
+            .phase34-payload/chunk-00 \
+            .phase34-payload/chunk-01 \
+            .phase34-payload/chunk-02 \
+            .phase34-payload/chunk-03 \
+            .phase34-payload/chunk-04 \
+            .phase34-payload/chunk-05 \
+            .phase34-payload/chunk-06 \
+            .phase34-payload/chunk-07a \
+            .phase34-payload/chunk-07b \
+            .phase34-payload/chunk-08 \
+            | base64 -d > /tmp/phase34-payload.tgz
           echo "9fe13978006e393bbb034d8ce9d5fd53fa120750216b8ddd59d19fe3a5c05efd  /tmp/phase34-payload.tgz" | sha256sum -c -
           tar -xzf /tmp/phase34-payload.tgz
           rm -rf .phase34-payload .github/workflows/phase34-one-time-payload-unpack.yml
