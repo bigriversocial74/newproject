@@ -166,3 +166,4 @@ if ($failures !== []) {
 }
 
 fwrite(STDOUT, "Phase 30 security audit hardening database certification passed.\n");
+require __DIR__ . '/phase30_security_runtime_database_integration.php';
