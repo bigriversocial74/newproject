@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS security_incident_notes (
 
 CREATE TABLE IF NOT EXISTS security_alert_preferences (
     account_scope BIGINT UNSIGNED PRIMARY KEY,
+    automatic_promotion_enabled TINYINT(1) NOT NULL DEFAULT 0,
     minimum_risk ENUM('low','medium','high','critical') NOT NULL DEFAULT 'high',
     include_integrity_failures TINYINT(1) NOT NULL DEFAULT 1,
     notify_on_promotion TINYINT(1) NOT NULL DEFAULT 1,
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS security_alert_preferences (
     updated_by_user_id BIGINT UNSIGNED NOT NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
+    KEY idx_security_alert_automatic (automatic_promotion_enabled, minimum_risk, account_scope),
     CONSTRAINT fk_security_alert_preference_user FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
