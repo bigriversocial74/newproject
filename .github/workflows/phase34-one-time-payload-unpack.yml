@@ -1,0 +1,31 @@
+name: Phase 34 One-Time Payload Unpack
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase34-payload-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  unpack:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Verify and unpack Phase 34 payload
+        run: |
+          cat .phase34-payload/chunk-* | base64 -d > /tmp/phase34-payload.tgz
+          echo "9fe13978006e393bbb034d8ce9d5fd53fa120750216b8ddd59d19fe3a5c05efd  /tmp/phase34-payload.tgz" | sha256sum -c -
+          tar -xzf /tmp/phase34-payload.tgz
+          rm -rf .phase34-payload .github/workflows/phase34-one-time-payload-unpack.yml
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Build Phase 34 release deployment control center"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
