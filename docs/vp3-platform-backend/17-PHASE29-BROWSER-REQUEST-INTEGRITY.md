@@ -16,6 +16,7 @@ Phase 29 establishes one reusable browser-request integrity policy for session-c
 - Require `application/json` or an `application/*+json` media type for browser mutation requests.
 - Run integrity checks before body parsing, authentication-context resolution, CSRF validation, or database work.
 - Apply the boundary to every `/api/control-center/v1/*` request through the shared endpoint helper.
+- Revalidate the Control Center boundary before account-context resolution so a future route-helper omission still fails closed before session, CSRF, or database access.
 - Apply the boundary to HomeServer registration, registration options, fleet reads, suspension, revocation, replacement, transfer requests, and transfer acceptance.
 - Preserve Phase 28 authentication behavior through the existing `AuthRequestIntegrity` compatibility facade.
 
@@ -32,6 +33,12 @@ Unsupported browser mutation media types return:
 - error code `unsupported_media_type`
 
 The public response does not disclose which host, origin, referer, or Fetch Metadata comparison failed.
+
+## Control Center defense in depth
+
+`ControlCenterEndpoint::requireMethod()` validates the browser boundary before request-body parsing.
+
+`ControlCenterEndpoint::accountContextForRoles()` independently revalidates the same boundary before authentication-context resolution, CSRF validation, public-account resolution, or database-backed customer actions. The second validation is intentional defense in depth and does not replace the required pre-parsing route check.
 
 ## HomeServer authentication-mode separation
 
@@ -67,6 +74,7 @@ Phase 28 production deployment requirements remain unchanged:
 - Trusted same-origin JSON acceptance.
 - Cross-origin, host mismatch, opaque origin, cross-site metadata, missing production source, and non-JSON rejection.
 - Proof that rejected requests do not produce database state.
+- Static proof that Control Center integrity runs before parsing and again before account resolution.
 - Static proof that all browser HomeServer endpoints validate integrity before payload parsing.
 - Static proof that bearer-authenticated HomeServer endpoints remain outside the browser boundary.
 - Retained Phase 28 authentication request and secure session transport certification.
