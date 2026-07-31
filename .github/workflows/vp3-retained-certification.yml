@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vp3-retained-runner-recovery-${{ github.event.pull_request.number || github.ref }}
+  group: vp3-retained-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,9 +32,13 @@ jobs:
           php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
       - name: Validate PHP and JavaScript syntax
         run: |
-          find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
+          find src public tests config workers tools -name '*.php' -print0 | xargs -0 -n1 php -l
           for file in public/assets/*.js; do node --check "$file"; done
-      - name: Run retained Phase 2 through Phase 29 contracts
+      - name: Verify committed standalone cumulative SQL installer
+        run: |
+          php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
+      - name: Run retained Phase 2 through Phase 30 contracts
         run: |
           php tests/run.php
           php tests/phase3_contract.php
@@ -73,6 +77,7 @@ jobs:
           php tests/phase27_public_authentication_response_contract.php
           php tests/phase28_auth_request_session_transport_contract.php
           php tests/phase29_browser_request_integrity_contract.php
+          php tests/phase30_security_audit_hardening_contract.php
 
   mysql8:
     runs-on: ubuntu-22.04
@@ -91,19 +96,18 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Install MySQL client
-        run: sudo apt-get update && sudo apt-get install -y mysql-client
-      - name: Import cumulative installer twice
-        working-directory: database
+      - name: Install native PHP and MySQL client
         run: |
-          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
-          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained and Phase 29 database certification
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mysql-client
+          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
+      - name: Verify and import standalone installer twice
+        run: |
+          php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
+          mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
+      - name: Run retained Phase 2 through Phase 30 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -136,6 +140,7 @@ jobs:
           php tests/phase27_public_authentication_response_database_integration.php
           php tests/phase28_auth_request_session_transport_database_integration.php
           php tests/phase29_browser_request_integrity_database_integration.php
+          php tests/phase30_security_audit_hardening_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-22.04
@@ -154,19 +159,18 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Install MariaDB client
-        run: sudo apt-get update && sudo apt-get install -y mariadb-client
-      - name: Import cumulative installer twice
-        working-directory: database
+      - name: Install native PHP and MariaDB client
         run: |
-          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
-          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained and Phase 29 database certification
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mariadb-client
+          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
+      - name: Verify and import standalone installer twice
+        run: |
+          php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
+          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
+      - name: Run retained Phase 2 through Phase 30 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -199,3 +203,4 @@ jobs:
           php tests/phase27_public_authentication_response_database_integration.php
           php tests/phase28_auth_request_session_transport_database_integration.php
           php tests/phase29_browser_request_integrity_database_integration.php
+          php tests/phase30_security_audit_hardening_database_integration.php
