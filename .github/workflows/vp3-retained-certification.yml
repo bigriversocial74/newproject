@@ -77,7 +77,8 @@ jobs:
             php tests/phase31_security_center_contract.php &&
             php tests/phase32_security_incident_automation_contract.php &&
             php tests/phase33_production_deployment_contract.php &&
-            php tests/phase33_operator_controls_contract.php
+            php tests/phase33_operator_controls_contract.php &&
+            php tests/phase34_release_deployment_control_center_contract.php
           '
       - name: Verify committed standalone cumulative SQL installer
         run: git diff --exit-code -- database/vp3-single-install.sql
@@ -110,7 +111,7 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 33 database certification
+      - name: Run retained Phase 2 through Phase 34 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -151,6 +152,7 @@ jobs:
           php tests/phase32_assignment_replay_database_integration.php
           php tests/phase33_production_deployment_database_integration.php
           php tests/phase33_operator_controls_database_integration.php
+          php tests/phase34_release_deployment_control_center_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-24.04
@@ -180,7 +182,7 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 33 database certification
+      - name: Run retained Phase 2 through Phase 34 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -221,3 +223,4 @@ jobs:
           php tests/phase32_assignment_replay_database_integration.php
           php tests/phase33_production_deployment_database_integration.php
           php tests/phase33_operator_controls_database_integration.php
+          php tests/phase34_release_deployment_control_center_database_integration.php

@@ -4,10 +4,33 @@ declare(strict_types=1);
 
 namespace Vp3\Deployment;
 
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use RuntimeException;
 
 final class ReleaseManifestService
 {
+    /** @var list<string> */
+    private const SOURCE_ROOTS = ['src', 'public', 'workers', 'tools'];
+
+    /** @var list<string> */
+    private const SOURCE_FILES = [
+        'bootstrap.php',
+        'composer.json',
+        'composer.lock',
+        'config/config-example.php',
+        'config/release.php',
+    ];
+
+    /** @var list<string> */
+    private const SOURCE_EXCLUDED_PREFIXES = [
+        'public/uploads/',
+        'public/storage/',
+        'public/media/',
+        'public/cache/',
+    ];
+
     /** @param array<string,mixed> $release */
     public function __construct(
         private readonly string $root,
@@ -32,6 +55,7 @@ final class ReleaseManifestService
                 'bytes' => $this->fileBytes($absolute),
             ];
         }
+        $sourceDocuments = $this->sourceDocuments();
 
         $manifest = [
             'format' => (string) ($this->release['format'] ?? ''),
@@ -52,6 +76,10 @@ final class ReleaseManifestService
                 'path' => $this->relative($manifestPath),
                 'sha256' => $this->fileSha256($manifestPath),
                 'bytes' => $this->fileBytes($manifestPath),
+            ],
+            'application_source' => [
+                'file_count' => count($sourceDocuments),
+                'tree_sha256' => hash('sha256', $this->canonicalJson($sourceDocuments)),
             ],
         ];
         $manifest['manifest_sha256'] = hash('sha256', $this->canonicalJson($manifest));
@@ -114,6 +142,73 @@ final class ReleaseManifestService
         );
     }
 
+    /** @return list<array{path:string,sha256:string,bytes:int}> */
+    private function sourceDocuments(): array
+    {
+        $paths = [];
+        foreach (self::SOURCE_ROOTS as $root) {
+            $absoluteRoot = $this->root . '/' . $root;
+            if (!is_dir($absoluteRoot)) {
+                throw new RuntimeException('A required application source directory is missing: ' . $root);
+            }
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator(
+                    $absoluteRoot,
+                    FilesystemIterator::SKIP_DOTS | FilesystemIterator::CURRENT_AS_FILEINFO
+                ),
+                RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($iterator as $file) {
+                if ($file->isLink()) {
+                    throw new RuntimeException('Application source symlinks are not permitted in release identity.');
+                }
+                if (!$file->isFile()) {
+                    continue;
+                }
+                $relative = $this->relative($file->getPathname());
+                if ($this->excludedSourcePath($relative)) {
+                    continue;
+                }
+                $paths[] = $relative;
+            }
+        }
+        foreach (self::SOURCE_FILES as $relative) {
+            $absolute = $this->root . '/' . $relative;
+            if (is_link($absolute)) {
+                throw new RuntimeException('Application source symlinks are not permitted in release identity.');
+            }
+            if (is_file($absolute)) {
+                $paths[] = $relative;
+            }
+        }
+        $paths = array_values(array_unique($paths));
+        sort($paths, SORT_STRING);
+        if ($paths === []) {
+            throw new RuntimeException('The application source release identity is empty.');
+        }
+
+        $documents = [];
+        foreach ($paths as $relative) {
+            $absolute = $this->absolute($relative);
+            $documents[] = [
+                'path' => $relative,
+                'sha256' => $this->fileSha256($absolute),
+                'bytes' => $this->fileBytes($absolute),
+            ];
+        }
+        return $documents;
+    }
+
+    private function excludedSourcePath(string $relative): bool
+    {
+        foreach (self::SOURCE_EXCLUDED_PREFIXES as $prefix) {
+            if (str_starts_with($relative, $prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** @param mixed $value @return mixed */
     private function canonicalize(mixed $value): mixed
     {
@@ -155,7 +250,9 @@ final class ReleaseManifestService
         fclose($pipes[2]);
         $status = proc_close($process);
         if ($status !== 0 || !is_string($stdout)) {
-            throw new RuntimeException('Unable to resolve the current Git commit: ' . mb_substr(trim((string) $stderr), 0, 200));
+            throw new RuntimeException(
+                'Unable to resolve the current Git commit: ' . mb_substr(trim((string) $stderr), 0, 200)
+            );
         }
         return trim($stdout);
     }
