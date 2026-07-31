@@ -1,0 +1,96 @@
+name: Phase 35 Web Setup Config Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase35-web-setup-config-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Make config example rename-and-edit ready
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('config/config-example.php')
+          text = path.read_text()
+          marker = '$vp3LocalSettings = ['
+          if marker not in text:
+              anchor = "declare(strict_types=1);\n"
+              block = r'''
+
+/*
+ * BROWSER INSTALLATION
+ * --------------------
+ * 1. Rename this file from config-example.php to config.php.
+ * 2. Edit only the values in this block for a basic installation.
+ * 3. Import database/vp3-single-install.sql.
+ * 4. Open /setup.php to create the first administrator.
+ *
+ * Environment variables may still override these values on advanced hosts.
+ */
+$vp3LocalSettings = [
+    'app_env' => 'production',
+    'app_base_url' => 'https://YOUR-DOMAIN.example',
+    'database_dsn' => 'mysql:host=localhost;dbname=YOUR_DATABASE;charset=utf8mb4',
+    'database_username' => 'YOUR_DATABASE_USER',
+    'database_password' => 'YOUR_DATABASE_PASSWORD',
+    'auth_secret_encryption_key_base64' => 'CHANGE_THIS_TO_A_BASE64_32_BYTE_KEY',
+    'first_user_setup_key' => 'CHANGE_THIS_TO_A_PRIVATE_SETUP_KEY_AT_LEAST_20_CHARACTERS',
+];
+'''
+              if anchor not in text:
+                  raise SystemExit('Config declaration anchor not found')
+              text = text.replace(anchor, anchor + block, 1)
+
+          replacements = {
+              "getenv('APP_ENV') ?: 'development'": "getenv('APP_ENV') ?: $vp3LocalSettings['app_env']",
+              "getenv('APP_BASE_URL') ?: 'https://vp3.me'": "getenv('APP_BASE_URL') ?: $vp3LocalSettings['app_base_url']",
+              "getenv('DB_DSN') ?: 'mysql:host=127.0.0.1;dbname=vp3;charset=utf8mb4'": "getenv('DB_DSN') ?: $vp3LocalSettings['database_dsn']",
+              "getenv('DB_USERNAME') ?: 'vp3'": "getenv('DB_USERNAME') ?: $vp3LocalSettings['database_username']",
+              "getenv('DB_PASSWORD') ?: ''": "getenv('DB_PASSWORD') ?: $vp3LocalSettings['database_password']",
+              "getenv('AUTH_SECRET_ENCRYPTION_KEY_B64') ?: ''": "getenv('AUTH_SECRET_ENCRYPTION_KEY_B64') ?: $vp3LocalSettings['auth_secret_encryption_key_base64']",
+          }
+          for old, new in replacements.items():
+              if old in text:
+                  text = text.replace(old, new, 1)
+              elif new not in text:
+                  raise SystemExit(f'Config replacement anchor missing: {old}')
+
+          setup_block = """    'setup' => [
+        'enabled' => true,
+        'first_user_key' => $vp3LocalSettings['first_user_setup_key'],
+        'grant_platform_operator_to_first_owner' => true,
+    ],
+"""
+          if "'grant_platform_operator_to_first_owner'" not in text:
+              anchor = "    'mail' => [\n"
+              if anchor not in text:
+                  raise SystemExit('Config setup section anchor not found')
+              text = text.replace(anchor, setup_block + anchor, 1)
+
+          path.write_text(text)
+          PY
+          php -l config/config-example.php
+          php tests/phase35_web_first_administrator_setup_contract.php
+          git diff --check
+          if git diff --quiet -- config/config-example.php; then
+            echo "Editable config example already current."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add config/config-example.php
+          git commit -m "Make VP3 config example browser-install ready"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
