@@ -1,15 +1,13 @@
-name: VP3 Retained Certification
+name: Phase 30 Security Audit Hardening
 
 on:
   pull_request:
-    types: [ready_for_review]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: vp3-retained-${{ github.event.pull_request.number || github.ref }}
+  group: phase30-vp3-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,6 +36,14 @@ jobs:
         run: |
           php tools/build-single-install.php
           git diff --exit-code -- database/vp3-single-install.sql
+      - name: Upload standalone SQL installer
+        if: matrix.php == '8.3'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vp3-phase30-single-install
+          path: database/vp3-single-install.sql
+          if-no-files-found: error
+          retention-days: 7
       - name: Run retained Phase 2 through Phase 30 contracts
         run: |
           php tests/run.php
@@ -107,7 +113,7 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 30 database certification
+      - name: Run retained and Phase 30 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -170,7 +176,7 @@ jobs:
           git diff --exit-code -- database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
-      - name: Run retained Phase 2 through Phase 30 database certification
+      - name: Run retained and Phase 30 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
