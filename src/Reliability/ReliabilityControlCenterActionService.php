@@ -93,8 +93,7 @@ final class ReliabilityControlCenterActionService
                     'status_since' => $now,
                     'enabled' => $enabled ? 1 : 0,
                     'display_order' => $displayOrder,
-                    'created_by_user_id' => $actorId,
-                    'updated_by_user_id' => $actorId,
+                    'actor_id' => $actorId,
                     'created' => $now,
                     'updated' => $now,
                 ]);
@@ -342,7 +341,8 @@ final class ReliabilityControlCenterActionService
                     'description' => $pageDescription,
                     'enabled' => $publicEnabled ? 1 : 0,
                     'history' => $showHistory ? 1 : 0,
-                    'actor_id' => $actorId,
+                    'created_by_user_id' => $actorId,
+                    'updated_by_user_id' => $actorId,
                     'created' => $now,
                     'updated' => $now,
                 ]);
