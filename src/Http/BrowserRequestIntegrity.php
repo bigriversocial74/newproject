@@ -95,7 +95,7 @@ final class BrowserRequestIntegrity
         $contentType = strtolower(trim((string) ($server['CONTENT_TYPE'] ?? $server['HTTP_CONTENT_TYPE'] ?? '')));
         $mediaType = trim(explode(';', $contentType, 2)[0] ?? '');
         $isJson = $mediaType === 'application/json'
-            || preg_match('#^application/[a-z0-9!#$&^_.+\-]+\+json$#', $mediaType) === 1;
+            || preg_match('~^application/[a-z0-9!#$&^_.+\-]+\+json$~', $mediaType) === 1;
 
         if (!$isJson) {
             throw new AuthPublicException(
