@@ -51,7 +51,7 @@ foreach ($requiredTables as $table) {
 }
 $assert(str_contains($migration, 'UNIQUE KEY uq_security_audit_scope_sequence'), 'The audit ledger does not enforce per-account sequence uniqueness.');
 $assert(str_contains($migration, 'UNIQUE KEY uq_security_audit_chain_hash'), 'The audit ledger does not enforce chain-hash uniqueness.');
-$assert(str_contains($migration, "event_retention_days SMALLINT UNSIGNED NOT NULL DEFAULT 2555"), 'The default seven-year audit retention contract is missing.');
+$assert(str_contains($migration, 'event_retention_days SMALLINT UNSIGNED NOT NULL DEFAULT 2555'), 'The default seven-year audit retention contract is missing.');
 
 $assert(str_contains($service, 'SELECT last_sequence,last_chain_hash') && str_contains($service, 'FOR UPDATE'), 'Security audit writes do not serialize on the account chain head.');
 $assert(str_contains($service, 'previous_chain_hash') && str_contains($service, 'chain_hash'), 'Security audit writes do not retain the hash-chain boundary.');
@@ -64,7 +64,8 @@ $assert(str_contains($service, 'hashClientValue($ipAddress)') && str_contains($s
 $assert(str_contains($authAudit, 'new SecurityAuditService($database)'), 'Authentication auditing is not connected to the Phase 30 ledger.');
 $assert(substr_count($authAudit, '$this->securityAudit->record(') >= 2, 'Authentication and session events are not both bridged into the Phase 30 ledger.');
 $assert(str_contains($authAudit, '$this->database->transaction('), 'Legacy and Phase 30 authentication audit writes are not atomic.');
-$assert(str_contains($authAudit, "eventType: 'session.' . $eventType"), 'Session lifecycle events do not use the Phase 30 session namespace.');
+$assert(str_contains($authAudit, "eventType: 'session.' . \$eventType"), 'Session lifecycle events do not use the Phase 30 session namespace.');
+$assert(str_contains($authAudit, "str_starts_with(\$normalized, 'auth.mfa.')"), 'MFA events are not classified into the dedicated MFA category.');
 
 if ($failures !== []) {
     fwrite(STDERR, "Phase 30 security audit hardening contract failures:\n- " . implode("\n- ", $failures) . "\n");
