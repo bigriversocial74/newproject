@@ -84,7 +84,23 @@ final class ReleaseDeploymentWorkerService
             'environment_key' => $environmentKey,
         ]);
         if ($statement->rowCount() !== 1) {
-            throw new RuntimeException('The platform deployment environment is not registered or is disabled.');
+
+            $exists = $this->database->pdo()->prepare(
+
+                "SELECT COUNT(*) FROM platform_deployment_environments
+
+                 WHERE environment_key=:environment_key AND environment_status<>'disabled'"
+
+            );
+
+            $exists->execute(['environment_key' => $environmentKey]);
+
+            if ((int) $exists->fetchColumn() !== 1) {
+
+                throw new RuntimeException('The platform deployment environment is not registered or is disabled.');
+
+            }
+
         }
     }
 
