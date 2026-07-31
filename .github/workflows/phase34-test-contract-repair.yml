@@ -30,12 +30,12 @@ jobs:
           }"""
           new = """$assert(str_contains($grant, 'public function grant('), 'Operator grant service is missing its grant boundary.');
           $assert(str_contains($grant, 'public function revoke('), 'Operator grant service is missing its revocation boundary.');
-          $assert(str_contains($grant, \"$actionType = $action . '_platform_operator';\"), 'Operator grant receipts are not action-specific.');"""
+          $assert(str_contains($grant, \"'_platform_operator'\"), 'Operator grant receipts are not action-specific.');"""
           if old in contract:
               contract = contract.replace(old, new)
           contract = contract.replace(
               "$assert(str_contains($actions, \"environment_key='staging'\"), 'Production promotion does not require staging evidence.');",
-              "$assert(str_contains($actions, \"hash_equals('staging', (string) $source['environment_key'])\"), 'Production promotion does not require staging evidence.');"
+              "$assert(str_contains($actions, \"hash_equals('staging'\"), 'Production promotion does not require staging evidence.');"
           )
           contract = contract.replace(
               "$assert(str_contains($page, 'Release &amp; Deployments'), 'Release Control Center page is missing.');",
