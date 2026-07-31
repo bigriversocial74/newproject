@@ -66,15 +66,16 @@ try {
             break;
 
         case 'assign_case':
-            $response->assignCase(
-                $accountId,
-                $actorId,
-                $role,
-                (string) ($payload['case_public_id'] ?? ''),
-                (string) ($payload['assignee_user_public_id'] ?? ''),
-                $requestId
-            );
-            $data = ['assigned' => true];
+            $data = [
+                'assigned' => $response->assignCase(
+                    $accountId,
+                    $actorId,
+                    $role,
+                    (string) ($payload['case_public_id'] ?? ''),
+                    (string) ($payload['assignee_user_public_id'] ?? ''),
+                    $requestId
+                ),
+            ];
             break;
 
         case 'add_note':
