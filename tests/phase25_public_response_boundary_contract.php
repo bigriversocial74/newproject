@@ -72,7 +72,23 @@ $assert(str_contains($controlBootstrap, 'PublicResponseGuard::enable()'), 'Contr
 $assert(str_contains($controlEndpoint, 'PublicResponseGuard::enable()'), 'Control Center account contexts do not enable the public response boundary.');
 $assert(str_contains($homeServerEndpoint, 'PublicResponseGuard::enable()'), 'HomeServer browser account contexts do not enable the public response boundary.');
 $assert(str_contains($guard, "'source_id' => true") && str_contains($guard, "'license_id' => true") && str_contains($guard, "'session_id' => true"), 'The forbidden-key catalog omits required internal relationships.');
-$assert(!str_contains(substr($homeServerEndpoint, 0, (int) strpos($homeServerEndpoint, 'public static function accountContext')), 'PublicResponseGuard::enable()'), 'Device bearer helpers unexpectedly enable the browser response boundary.');
+
+$deviceMethodStart = strpos($homeServerEndpoint, 'public static function requireMethod(string $method)');
+$browserMethodStart = strpos($homeServerEndpoint, 'public static function requireBrowserMethod(string $method)');
+$payloadMethodStart = strpos($homeServerEndpoint, 'public static function payload()');
+$deviceMethodSource = $deviceMethodStart !== false
+    && $browserMethodStart !== false
+    && $deviceMethodStart < $browserMethodStart
+        ? substr($homeServerEndpoint, $deviceMethodStart, $browserMethodStart - $deviceMethodStart)
+        : '';
+$browserMethodSource = $browserMethodStart !== false
+    && $payloadMethodStart !== false
+    && $browserMethodStart < $payloadMethodStart
+        ? substr($homeServerEndpoint, $browserMethodStart, $payloadMethodStart - $browserMethodStart)
+        : '';
+
+$assert($deviceMethodSource !== '' && !str_contains($deviceMethodSource, 'PublicResponseGuard::enable()'), 'Device bearer helpers unexpectedly enable the browser response boundary.');
+$assert($browserMethodSource !== '' && str_contains($browserMethodSource, 'PublicResponseGuard::enable()'), 'HomeServer browser helper does not enable the public response boundary.');
 
 if ($failures !== []) {
     fwrite(STDERR, "Phase 25 public response boundary contract failures:\n- " . implode("\n- ", $failures) . "\n");

@@ -1,15 +1,13 @@
-name: VP3 Retained Certification
+name: Phase 29 Browser Request Integrity
 
 on:
   pull_request:
-    types: [ready_for_review]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: vp3-retained-runner-recovery-${{ github.event.pull_request.number || github.ref }}
+  group: phase29-vp3-runner-recovery-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -6,7 +6,7 @@ use Vp3\Http\HomeServerEndpoint;
 use Vp3\Http\JsonResponse;
 
 $container = require __DIR__ . '/_bootstrap.php';
-HomeServerEndpoint::requireMethod('POST');
+HomeServerEndpoint::requireBrowserMethod('POST');
 try {
     $payload = HomeServerEndpoint::payload();
     $account = HomeServerEndpoint::accountContext($container, $payload);

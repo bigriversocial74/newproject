@@ -23,7 +23,7 @@ $registerEndpoint = $read('public/api/homeserver/v1/register.php');
 $transferEndpoint = $read('public/api/homeserver/v1/transfer-request.php');
 $acceptEndpoint = $read('public/api/homeserver/v1/transfer-accept.php');
 
-$assert(str_contains($endpoint, "HomeServerEndpoint::requireMethod('POST')"), 'Fleet endpoint is not POST-only.');
+$assert(str_contains($endpoint, "HomeServerEndpoint::requireBrowserMethod('POST')"), 'Fleet endpoint is not POST-only and browser-integrity protected.');
 $assert(str_contains($endpoint, 'HomeServerEndpoint::accountContext'), 'Fleet endpoint does not enforce authenticated account ownership and CSRF.');
 $assert(str_contains($optionsEndpoint, 'HomeServerEndpoint::accountContext'), 'Registration options are not account authenticated.');
 $assert(str_contains($service, 'WHERE d.account_id=:account'), 'Fleet query is not account scoped.');

@@ -14,11 +14,26 @@ final class HomeServerEndpoint
 {
     public const MAX_JSON_BYTES = 65536;
 
+    private static ?BrowserRequestIntegrity $requestIntegrity = null;
+
+    public static function configureRequestIntegrity(BrowserRequestIntegrity $requestIntegrity): void
+    {
+        self::$requestIntegrity = $requestIntegrity;
+    }
+
     public static function requireMethod(string $method): void
     {
-        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== strtoupper($method)) {
-            JsonResponse::send(['error' => ['code' => 'method_not_allowed', 'message' => $method . ' required.']], 405);
+        $requiredMethod = strtoupper($method);
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== $requiredMethod) {
+            JsonResponse::send(['error' => ['code' => 'method_not_allowed', 'message' => $requiredMethod . ' required.']], 405);
         }
+    }
+
+    public static function requireBrowserMethod(string $method): void
+    {
+        PublicResponseGuard::enable();
+        self::requireMethod($method);
+        self::assertTrustedBrowserRequest(strtoupper($method));
     }
 
     /** @return array<string,mixed> */
@@ -74,6 +89,7 @@ final class HomeServerEndpoint
     public static function accountContext(array $container, array $payload): array
     {
         PublicResponseGuard::enable();
+        self::assertTrustedBrowserRequest(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'POST')));
         $current = $container['authentication_context']->requireCurrent(AuthEndpoint::ip(), AuthEndpoint::userAgent());
         $container['session']->assertCsrf(AuthEndpoint::csrf($payload));
         if (array_key_exists('account_id', $payload)) {
@@ -113,5 +129,23 @@ final class HomeServerEndpoint
             JsonResponse::send(['error' => ['code' => 'homeserver_request_rejected', 'message' => $message]], $status);
         }
         JsonResponse::send(['error' => ['code' => 'homeserver_request_failed', 'message' => 'Unable to complete the HomeServer request.']], 500);
+    }
+
+    private static function assertTrustedBrowserRequest(string $method): void
+    {
+        if (self::$requestIntegrity === null) {
+            JsonResponse::send([
+                'error' => [
+                    'code' => 'request_integrity_unavailable',
+                    'message' => 'Request validation is temporarily unavailable.',
+                ],
+            ], 503);
+        }
+
+        try {
+            self::$requestIntegrity->assertTrustedMutation($_SERVER, $method);
+        } catch (Throwable $exception) {
+            self::sendException($exception);
+        }
     }
 }
