@@ -7,12 +7,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: phase29-vp3-${{ github.event.pull_request.number || github.ref }}
+  group: phase29-vp3-runner-recovery-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   php:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +73,7 @@ jobs:
           php tests/phase29_browser_request_integrity_contract.php
 
   mysql8:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     services:
       mysql:
         image: mysql:8.0
@@ -89,7 +89,7 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cc611a83d6f7372e7f7f945ceb49a
+      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
         with:
           php-version: '8.3'
           extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
@@ -136,7 +136,7 @@ jobs:
           php tests/phase29_browser_request_integrity_database_integration.php
 
   mariadb1011:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     services:
       mariadb:
         image: mariadb:10.11
