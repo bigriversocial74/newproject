@@ -1,7 +1,10 @@
 /vendor/
 /config/config.php
+/config/config-generated-secrets.php
+/config/config-generated-secrets.php.tmp.*
 /.env
 /.env.*
 !/config/config-example.php
+!/config/config-example-browser.php
 /var/cache/
 /var/log/
