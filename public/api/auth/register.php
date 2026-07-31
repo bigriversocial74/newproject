@@ -17,9 +17,24 @@ try {
         AuthEndpoint::ip(),
         AuthEndpoint::userAgent()
     );
+    $statement = $container['database']->pdo()->prepare(
+        "SELECT a.public_id AS account_public_id,u.public_id AS user_public_id
+         FROM accounts a
+         JOIN users u ON u.id=:user
+         JOIN account_users au ON au.account_id=a.id AND au.user_id=u.id AND au.status='active'
+         WHERE a.id=:account
+         LIMIT 1"
+    );
+    $statement->execute(['user' => (int) $result['user_id'], 'account' => (int) $result['account_id']]);
+    $identities = $statement->fetch();
+    if (!is_array($identities)
+        || trim((string) ($identities['account_public_id'] ?? '')) === ''
+        || trim((string) ($identities['user_public_id'] ?? '')) === '') {
+        throw new RuntimeException('Registration identities are unavailable.');
+    }
     JsonResponse::send(['data' => [
-        'account_id' => $result['account_id'],
-        'user_id' => $result['user_id'],
+        'account_public_id' => (string) $identities['account_public_id'],
+        'user_public_id' => (string) $identities['user_public_id'],
         'status' => 'pending_verification',
     ]], 201);
 } catch (Throwable $exception) {
