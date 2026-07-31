@@ -224,28 +224,51 @@ final class SecurityIncidentResponseService
         string $casePublicId,
         string $assigneeUserPublicId,
         string $requestId
-    ): void {
+    ): bool {
+        $casePublicId = trim($casePublicId);
+        $assigneeUserPublicId = trim($assigneeUserPublicId);
         $requestId = $this->requestId($requestId);
-        $this->database->transaction(function (PDO $pdo) use (
+        $assigned = $this->database->transaction(function (PDO $pdo) use (
             $accountId,
             $actorUserId,
             $actorRole,
             $casePublicId,
             $assigneeUserPublicId,
             $requestId
-        ): void {
+        ): bool {
             $this->assertActor($pdo, $accountId, $actorUserId, $actorRole, self::MANAGER_ROLES, true);
-            if (is_array($this->responseAction($pdo, $accountId, $requestId, 'assign_case'))) {
-                return;
+            $prior = $this->responseAction($pdo, $accountId, $requestId, 'assign_case');
+            if (is_array($prior)) {
+                if ($this->assignmentReplayMatches(
+                    $pdo,
+                    $accountId,
+                    $prior,
+                    $casePublicId,
+                    $assigneeUserPublicId
+                )) {
+                    return false;
+                }
+                throw new AuthPublicException(
+                    'security_response_request_conflict',
+                    'The request ID was already used for a different case assignment.',
+                    409
+                );
             }
             $case = $this->caseForUpdate($pdo, $accountId, $casePublicId);
+            if ((string) $case['case_status'] === 'resolved') {
+                throw new AuthPublicException(
+                    'security_case_resolved',
+                    'A resolved security case cannot be reassigned.',
+                    409
+                );
+            }
             $assignee = $pdo->prepare(
                 "SELECT u.id,u.public_id,au.role
                  FROM users u INNER JOIN account_users au ON au.user_id=u.id
                  WHERE u.public_id=:public_id AND au.account_id=:account_scope AND au.status='active'
                    AND au.role IN ('customer_owner','customer_admin','support_member') LIMIT 1 FOR UPDATE"
             );
-            $assignee->execute(['public_id' => trim($assigneeUserPublicId), 'account_scope' => $accountId]);
+            $assignee->execute(['public_id' => $assigneeUserPublicId, 'account_scope' => $accountId]);
             $assigneeRow = $assignee->fetch(PDO::FETCH_ASSOC);
             if (!is_array($assigneeRow)) {
                 throw new AuthPublicException('security_assignee_invalid', 'The selected security responder is not available.', 422);
@@ -276,8 +299,12 @@ final class SecurityIncidentResponseService
                 'success',
                 hash('sha256', $casePublicId . '|' . (string) $assigneeRow['public_id'] . '|' . $requestId)
             );
+            return true;
         });
 
+        if (!$assigned) {
+            return false;
+        }
         $this->audit->record(
             'security.incident.assigned',
             'platform',
@@ -292,6 +319,7 @@ final class SecurityIncidentResponseService
             ['assignee_user_public_id' => $assigneeUserPublicId],
             $requestId
         );
+        return true;
     }
 
     /** @return array{note_public_id:string,note_hash:string,created_at:string} */
@@ -628,6 +656,34 @@ final class SecurityIncidentResponseService
         ]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    /** @param array<string,mixed> $prior */
+    private function assignmentReplayMatches(
+        PDO $pdo,
+        int $accountId,
+        array $prior,
+        string $casePublicId,
+        string $assigneeUserPublicId
+    ): bool {
+        if ((string) ($prior['result'] ?? '') !== 'success'
+            || $prior['case_id'] === null
+            || $prior['target_user_id'] === null) {
+            return false;
+        }
+        $case = $pdo->prepare(
+            'SELECT public_id FROM security_incident_cases
+             WHERE id=:id AND account_scope=:account_scope LIMIT 1'
+        );
+        $case->execute(['id' => (int) $prior['case_id'], 'account_scope' => $accountId]);
+        $storedCase = $case->fetchColumn();
+        if (!is_string($storedCase) || !hash_equals($storedCase, $casePublicId)) {
+            return false;
+        }
+        $assignee = $pdo->prepare('SELECT public_id FROM users WHERE id=:id LIMIT 1');
+        $assignee->execute(['id' => (int) $prior['target_user_id']]);
+        $storedAssignee = $assignee->fetchColumn();
+        return is_string($storedAssignee) && hash_equals($storedAssignee, $assigneeUserPublicId);
     }
 
     /** @param array<string,mixed> $prior */
