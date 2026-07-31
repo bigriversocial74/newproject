@@ -100,13 +100,11 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Install MySQL client
-        run: sudo apt-get update && sudo apt-get install -y mysql-client
+      - name: Install native PHP and MySQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mysql-client
+          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
       - name: Generate and import standalone installer twice
         run: |
           php tools/build-single-install.php
@@ -164,13 +162,11 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Install MariaDB client
-        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+      - name: Install native PHP and MariaDB client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mariadb-client
+          php -r '$required = ["pdo", "pdo_mysql", "json", "mbstring", "openssl", "sodium", "zip"]; foreach ($required as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing PHP extension: {$extension}\n"); exit(1); } }'
       - name: Generate and import standalone installer twice
         run: |
           php tools/build-single-install.php
@@ -222,10 +218,6 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: '8.3'
-          coverage: none
       - name: Commit certified standalone installer when changed
         run: |
           php tools/build-single-install.php
