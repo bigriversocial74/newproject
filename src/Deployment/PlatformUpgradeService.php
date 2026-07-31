@@ -11,6 +11,8 @@ use Vp3\Database;
 
 final class PlatformUpgradeService
 {
+    private const PHASE33_MIGRATION = 'migrations/20260731_phase33_production_deployment_upgrade.sql';
+
     /** @param array<string,mixed> $deploymentConfig */
     public function __construct(
         private readonly string $root,
@@ -26,18 +28,41 @@ final class PlatformUpgradeService
     public function install(string $requestId): array
     {
         $requestId = $this->requestId($requestId);
+
         return $this->withLock(function (PDO $pdo) use ($requestId): array {
+            $report = $this->preflight->inspect($pdo);
+            if (($report['ok'] ?? false) !== true) {
+                throw new RuntimeException(
+                    'platform_install_preflight_failed:' . implode(',', (array) ($report['failures'] ?? []))
+                );
+            }
             if (!$this->databaseIsEmpty($pdo)) {
                 throw new RuntimeException('platform_install_database_not_empty');
             }
+
             $release = $this->releases->build();
             $this->commands->importSqlFile($this->root . '/' . (string) $release['installer']['path']);
-            $run = $this->createRun($pdo, $requestId, 'install', null, (string) $release['version'], 'verifying');
+            $run = $this->createRun(
+                $pdo,
+                $requestId,
+                'install',
+                null,
+                (string) $release['version'],
+                'verifying'
+            );
             $this->recordAllMigrations($pdo, (string) $release['version'], 'fresh_install');
             $verification = $this->verifyCurrentRelease($pdo, $release);
             $this->activateRelease($pdo, $release);
-            $this->completeRun($pdo, (int) $run['id'], $verification['evidence_hash']);
-            $this->receipt($pdo, (int) $run['id'], $requestId, 'platform_install', 'success', $verification['evidence_hash']);
+            $this->completeRun($pdo, (int) $run['id'], (string) $verification['evidence_hash']);
+            $this->receipt(
+                $pdo,
+                (int) $run['id'],
+                $requestId,
+                'platform_install',
+                'success',
+                (string) $verification['evidence_hash']
+            );
+
             return $this->publicRun($pdo, (int) $run['id']);
         });
     }
@@ -46,6 +71,7 @@ final class PlatformUpgradeService
     public function upgrade(string $requestId): array
     {
         $requestId = $this->requestId($requestId);
+
         return $this->withLock(function (PDO $pdo) use ($requestId): array {
             $release = $this->releases->build();
             if ($this->hasTable($pdo, 'platform_deployment_receipts')) {
@@ -60,7 +86,9 @@ final class PlatformUpgradeService
 
             $report = $this->preflight->inspect($pdo);
             if (($report['ok'] ?? false) !== true) {
-                throw new RuntimeException('platform_upgrade_preflight_failed:' . implode(',', (array) ($report['failures'] ?? [])));
+                throw new RuntimeException(
+                    'platform_upgrade_preflight_failed:' . implode(',', (array) ($report['failures'] ?? []))
+                );
             }
             if (!$this->hasTable($pdo, 'security_response_actions')) {
                 throw new RuntimeException('platform_upgrade_phase32_baseline_required');
@@ -96,13 +124,14 @@ final class PlatformUpgradeService
                 }
 
                 $backup = $this->commands->createBackup($pdo, $backupPublicId);
-                $this->updateJournal($journal, ['status' => 'backup_verified', 'backup_sha256' => $backup['sha256']]);
+                $this->updateJournal($journal, [
+                    'status' => 'backup_verified',
+                    'backup_sha256' => (string) $backup['sha256'],
+                ]);
 
                 $phase33Bootstrapped = false;
                 if (!$this->hasTable($pdo, 'platform_schema_migrations')) {
-                    $this->commands->importSqlFile(
-                        $this->root . '/database/migrations/20260731_phase33_production_deployment_upgrade.sql'
-                    );
+                    $this->commands->importSqlFile($this->root . '/database/' . self::PHASE33_MIGRATION);
                     $phase33Bootstrapped = true;
                 }
 
@@ -118,21 +147,30 @@ final class PlatformUpgradeService
                     );
                     $runId = (int) $run['id'];
                 }
+
                 $this->attachBackup($pdo, $runId, $backupPublicId, $backup);
                 $this->setRunStatus($pdo, $runId, 'applying');
                 $this->baselinePhase32($pdo, (string) $release['version'], $phase33Bootstrapped);
-
                 $applied = $this->applyPendingMigrations($pdo, $runId, (string) $release['version']);
+
                 $this->setRunStatus($pdo, $runId, 'verifying');
                 $verification = $this->verifyCurrentRelease($pdo, $release);
                 $this->activateRelease($pdo, $release);
-                $this->completeRun($pdo, $runId, $verification['evidence_hash']);
-                $this->receipt($pdo, $runId, $requestId, 'platform_upgrade', 'success', $verification['evidence_hash']);
+                $this->completeRun($pdo, $runId, (string) $verification['evidence_hash']);
+                $this->receipt(
+                    $pdo,
+                    $runId,
+                    $requestId,
+                    'platform_upgrade',
+                    'success',
+                    (string) $verification['evidence_hash']
+                );
                 $this->updateJournal($journal, [
                     'status' => 'completed',
-                    'evidence_hash' => $verification['evidence_hash'],
+                    'evidence_hash' => (string) $verification['evidence_hash'],
                     'applied_migrations' => $applied,
                 ]);
+
                 return $this->publicRun($pdo, $runId);
             } catch (Throwable $exception) {
                 $errorCode = $this->errorCode($exception);
@@ -140,12 +178,17 @@ final class PlatformUpgradeService
                 if ($runId !== null && $this->hasTable($pdo, 'platform_deployment_runs')) {
                     $this->failRun($pdo, $runId, $errorCode);
                 }
+
                 if (is_array($backup)) {
                     try {
                         if ($runId !== null && $this->hasTable($pdo, 'platform_deployment_runs')) {
                             $this->setRunStatus($pdo, $runId, 'rolling_back');
                         }
-                        $this->commands->restoreBackup($pdo, $backup['path'], $backup['sha256']);
+                        $this->commands->restoreBackup(
+                            $pdo,
+                            (string) $backup['path'],
+                            (string) $backup['sha256']
+                        );
                         $this->updateJournal($journal, ['status' => 'rolled_back']);
                         if ($this->hasTable($pdo, 'platform_deployment_runs')) {
                             $restoredRun = $this->runByPublicId($pdo, $runPublicId);
@@ -160,6 +203,7 @@ final class PlatformUpgradeService
                         ]);
                     }
                 }
+
                 throw $exception;
             }
         });
@@ -172,6 +216,7 @@ final class PlatformUpgradeService
             $report = $this->preflight->inspect($pdo, true);
             $release = $this->releases->build();
             $verification = $this->verifyCurrentRelease($pdo, $release);
+
             return [
                 'ok' => ($report['ok'] ?? false) === true,
                 'preflight' => $report,
@@ -184,11 +229,13 @@ final class PlatformUpgradeService
     public function rollback(string $runPublicId, string $requestId): array
     {
         $requestId = $this->requestId($requestId);
+        $runPublicId = trim($runPublicId);
+
         return $this->withLock(function (PDO $pdo) use ($runPublicId, $requestId): array {
             if (!$this->hasTable($pdo, 'platform_deployment_runs')) {
                 throw new RuntimeException('platform_rollback_ledger_missing');
             }
-            $run = $this->runByPublicId($pdo, trim($runPublicId));
+            $run = $this->runByPublicId($pdo, $runPublicId);
             if (!is_array($run) || $run['backup_public_id'] === null) {
                 throw new RuntimeException('platform_rollback_run_invalid');
             }
@@ -197,22 +244,34 @@ final class PlatformUpgradeService
                 return $this->publicRun($pdo, (int) $prior['id']);
             }
 
-            $backup = $pdo->prepare(
+            $backupStatement = $pdo->prepare(
                 'SELECT * FROM platform_deployment_backups
                  WHERE deployment_run_id=:run_id AND public_id=:public_id LIMIT 1'
             );
-            $backup->execute(['run_id' => (int) $run['id'], 'public_id' => (string) $run['backup_public_id']]);
-            $backupRow = $backup->fetch(PDO::FETCH_ASSOC);
-            if (!is_array($backupRow)) {
+            $backupStatement->execute([
+                'run_id' => (int) $run['id'],
+                'public_id' => (string) $run['backup_public_id'],
+            ]);
+            $backup = $backupStatement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($backup)) {
                 throw new RuntimeException('platform_rollback_backup_missing');
             }
+
+            $journal = $this->writeJournal([
+                'run_public_id' => $runPublicId,
+                'request_id' => $requestId,
+                'operation' => 'rollback',
+                'backup_public_id' => (string) $backup['public_id'],
+                'status' => 'rolling_back',
+            ]);
             $path = rtrim((string) $this->deploymentConfig['backup_root'], DIRECTORY_SEPARATOR)
-                . DIRECTORY_SEPARATOR . (string) $backupRow['public_id'] . '.sql';
+                . DIRECTORY_SEPARATOR . (string) $backup['public_id'] . '.sql';
             $this->setRunStatus($pdo, (int) $run['id'], 'rolling_back');
-            $this->commands->restoreBackup($pdo, $path, (string) $backupRow['file_sha256']);
+            $this->commands->restoreBackup($pdo, $path, (string) $backup['file_sha256']);
+            $this->updateJournal($journal, ['status' => 'rolled_back']);
 
             if ($this->hasTable($pdo, 'platform_deployment_runs')) {
-                $restored = $this->runByPublicId($pdo, (string) $run['public_id']);
+                $restored = $this->runByPublicId($pdo, $runPublicId);
                 if (is_array($restored)) {
                     $this->setRunStatus($pdo, (int) $restored['id'], 'rolled_back');
                     $this->receipt(
@@ -221,16 +280,21 @@ final class PlatformUpgradeService
                         $requestId,
                         'platform_rollback',
                         'success',
-                        hash('sha256', implode('|', [$runPublicId, (string) $backupRow['file_sha256'], $requestId]))
+                        hash('sha256', implode('|', [
+                            $runPublicId,
+                            (string) $backup['file_sha256'],
+                            $requestId,
+                        ]))
                     );
                     return $this->publicRun($pdo, (int) $restored['id']);
                 }
             }
-            return ['public_id' => $runPublicId, 'status' => 'rolled_back'];
+
+            return ['public_id' => $runPublicId, 'run_status' => 'rolled_back'];
         });
     }
 
-    /** @return array<string,mixed> */
+    /** @param array<string,mixed> $release @return array<string,mixed> */
     private function verifyCurrentRelease(PDO $pdo, array $release): array
     {
         if (!$this->hasTable($pdo, 'platform_schema_migrations')) {
@@ -252,6 +316,7 @@ final class PlatformUpgradeService
         if ($missing !== [] || $mismatched !== []) {
             throw new RuntimeException('platform_schema_verification_failed');
         }
+
         foreach ([
             'accounts',
             'auth_sessions',
@@ -266,7 +331,10 @@ final class PlatformUpgradeService
                 throw new RuntimeException('platform_smoke_table_missing_' . $table);
             }
         }
-        $pdo->query('SELECT 1')->fetchColumn();
+        if ((int) $pdo->query('SELECT 1')->fetchColumn() !== 1) {
+            throw new RuntimeException('platform_database_smoke_failed');
+        }
+
         $evidence = hash('sha256', $this->releases->canonicalJson([
             'release_version' => (string) $release['version'],
             'commit_sha' => (string) $release['commit_sha'],
@@ -275,6 +343,7 @@ final class PlatformUpgradeService
             'migration_count' => count($stored),
             'verified_paths' => array_keys($stored),
         ]));
+
         return [
             'version' => (string) $release['version'],
             'commit_sha' => (string) $release['commit_sha'],
@@ -287,10 +356,12 @@ final class PlatformUpgradeService
     /** @return list<string> */
     private function applyPendingMigrations(PDO $pdo, int $runId, string $releaseVersion): array
     {
-        $stored = $pdo->query('SELECT migration_path,migration_sha256 FROM platform_schema_migrations')
-            ->fetchAll(PDO::FETCH_KEY_PAIR);
+        $stored = $pdo->query(
+            'SELECT migration_path,migration_sha256 FROM platform_schema_migrations'
+        )->fetchAll(PDO::FETCH_KEY_PAIR);
         $applied = [];
-        $order = 100;
+        $stepOrder = 100;
+
         foreach ($this->releases->migrationPaths() as $path) {
             $sha = $this->releases->migrationSha256($path);
             if (isset($stored[$path])) {
@@ -299,8 +370,9 @@ final class PlatformUpgradeService
                 }
                 continue;
             }
+
             $stepKey = 'migration:' . $path;
-            $this->startStep($pdo, $runId, $order++, $stepKey, $path);
+            $this->startStep($pdo, $runId, $stepOrder++, $stepKey, $path);
             try {
                 $this->commands->importSqlFile($this->root . '/database/' . $path);
                 $pdo->prepare(
@@ -320,19 +392,21 @@ final class PlatformUpgradeService
                 throw $exception;
             }
         }
+
         return $applied;
     }
 
     private function baselinePhase32(PDO $pdo, string $releaseVersion, bool $phase33Bootstrapped): void
     {
-        $count = (int) $pdo->query('SELECT COUNT(*) FROM platform_schema_migrations')->fetchColumn();
-        if ($count > 0) {
+        if ((int) $pdo->query('SELECT COUNT(*) FROM platform_schema_migrations')->fetchColumn() > 0) {
             return;
         }
+
         foreach ($this->releases->migrationPaths() as $path) {
-            $mode = $path === 'migrations/20260731_phase33_production_deployment_upgrade.sql'
-                ? ($phase33Bootstrapped ? 'upgrade' : 'baseline')
-                : 'baseline';
+            if ($path === self::PHASE33_MIGRATION && !$phase33Bootstrapped) {
+                break;
+            }
+            $mode = $path === self::PHASE33_MIGRATION ? 'upgrade' : 'baseline';
             $pdo->prepare(
                 'INSERT INTO platform_schema_migrations
                  (migration_path,migration_sha256,applied_release_version,application_mode,applied_at)
@@ -344,6 +418,9 @@ final class PlatformUpgradeService
                 'mode' => $mode,
                 'applied_at' => $this->now(),
             ]);
+            if ($path === self::PHASE33_MIGRATION) {
+                break;
+            }
         }
     }
 
@@ -366,7 +443,7 @@ final class PlatformUpgradeService
         }
     }
 
-    /** @return array<string,mixed> */
+    /** @return array{id:int,public_id:string} */
     private function createRun(
         PDO $pdo,
         string $requestId,
@@ -396,6 +473,7 @@ final class PlatformUpgradeService
             'created_at' => $now,
             'updated_at' => $now,
         ]);
+
         return ['id' => (int) $pdo->lastInsertId(), 'public_id' => $publicId];
     }
 
@@ -420,7 +498,8 @@ final class PlatformUpgradeService
             'verified_at' => $now,
         ]);
         $pdo->prepare(
-            'UPDATE platform_deployment_runs SET backup_public_id=:backup,updated_at=:updated_at WHERE id=:id'
+            'UPDATE platform_deployment_runs
+             SET backup_public_id=:backup,updated_at=:updated_at WHERE id=:id'
         )->execute(['backup' => $publicId, 'updated_at' => $now, 'id' => $runId]);
     }
 
@@ -428,7 +507,10 @@ final class PlatformUpgradeService
     private function activateRelease(PDO $pdo, array $release): void
     {
         $now = $this->now();
-        $pdo->exec("UPDATE platform_release_records SET release_status='superseded',updated_at=" . $pdo->quote($now) . " WHERE release_status='active'");
+        $pdo->prepare(
+            "UPDATE platform_release_records
+             SET release_status='superseded',updated_at=:updated_at WHERE release_status='active'"
+        )->execute(['updated_at' => $now]);
         $pdo->prepare(
             "INSERT INTO platform_release_records
              (public_id,release_version,commit_sha,schema_level,installer_sha256,source_manifest_sha256,
@@ -461,13 +543,23 @@ final class PlatformUpgradeService
              INNER JOIN platform_deployment_runs r ON r.id=p.deployment_run_id
              WHERE p.request_id=:request_id AND p.action_type=:action AND p.result=:result LIMIT 1'
         );
-        $statement->execute(['request_id' => $requestId, 'action' => $action, 'result' => 'success']);
+        $statement->execute([
+            'request_id' => $requestId,
+            'action' => $action,
+            'result' => 'success',
+        ]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
     }
 
-    private function receipt(PDO $pdo, ?int $runId, string $requestId, string $action, string $result, string $evidence): void
-    {
+    private function receipt(
+        PDO $pdo,
+        ?int $runId,
+        string $requestId,
+        string $action,
+        string $result,
+        string $evidence
+    ): void {
         $pdo->prepare(
             'INSERT INTO platform_deployment_receipts
              (public_id,deployment_run_id,request_id,action_type,result,evidence_hash,created_at)
@@ -501,41 +593,67 @@ final class PlatformUpgradeService
     private function completeStep(PDO $pdo, int $runId, string $key, string $evidence): void
     {
         $pdo->prepare(
-            "UPDATE platform_deployment_steps SET step_status='completed',evidence_hash=:evidence,
-             completed_at=:completed_at WHERE deployment_run_id=:run_id AND step_key=:step_key"
-        )->execute(['evidence' => $evidence, 'completed_at' => $this->now(), 'run_id' => $runId, 'step_key' => $key]);
+            "UPDATE platform_deployment_steps
+             SET step_status='completed',evidence_hash=:evidence,completed_at=:completed_at
+             WHERE deployment_run_id=:run_id AND step_key=:step_key"
+        )->execute([
+            'evidence' => $evidence,
+            'completed_at' => $this->now(),
+            'run_id' => $runId,
+            'step_key' => $key,
+        ]);
     }
 
     private function failStep(PDO $pdo, int $runId, string $key, string $errorCode): void
     {
         $pdo->prepare(
-            "UPDATE platform_deployment_steps SET step_status='failed',error_code=:error_code,
-             completed_at=:completed_at WHERE deployment_run_id=:run_id AND step_key=:step_key"
-        )->execute(['error_code' => $errorCode, 'completed_at' => $this->now(), 'run_id' => $runId, 'step_key' => $key]);
+            "UPDATE platform_deployment_steps
+             SET step_status='failed',error_code=:error_code,completed_at=:completed_at
+             WHERE deployment_run_id=:run_id AND step_key=:step_key"
+        )->execute([
+            'error_code' => $errorCode,
+            'completed_at' => $this->now(),
+            'run_id' => $runId,
+            'step_key' => $key,
+        ]);
     }
 
     private function setRunStatus(PDO $pdo, int $runId, string $status): void
     {
-        $pdo->prepare('UPDATE platform_deployment_runs SET run_status=:status,updated_at=:updated_at WHERE id=:id')
-            ->execute(['status' => $status, 'updated_at' => $this->now(), 'id' => $runId]);
+        $pdo->prepare(
+            'UPDATE platform_deployment_runs
+             SET run_status=:status,updated_at=:updated_at WHERE id=:id'
+        )->execute(['status' => $status, 'updated_at' => $this->now(), 'id' => $runId]);
     }
 
     private function completeRun(PDO $pdo, int $runId, string $evidence): void
     {
         $now = $this->now();
         $pdo->prepare(
-            "UPDATE platform_deployment_runs SET run_status='completed',evidence_hash=:evidence,
-             finished_at=:finished_at,updated_at=:updated_at WHERE id=:id"
-        )->execute(['evidence' => $evidence, 'finished_at' => $now, 'updated_at' => $now, 'id' => $runId]);
+            "UPDATE platform_deployment_runs
+             SET run_status='completed',evidence_hash=:evidence,finished_at=:finished_at,updated_at=:updated_at
+             WHERE id=:id"
+        )->execute([
+            'evidence' => $evidence,
+            'finished_at' => $now,
+            'updated_at' => $now,
+            'id' => $runId,
+        ]);
     }
 
     private function failRun(PDO $pdo, int $runId, string $errorCode): void
     {
         $now = $this->now();
         $pdo->prepare(
-            "UPDATE platform_deployment_runs SET run_status='failed',error_code=:error_code,
-             finished_at=:finished_at,updated_at=:updated_at WHERE id=:id"
-        )->execute(['error_code' => $errorCode, 'finished_at' => $now, 'updated_at' => $now, 'id' => $runId]);
+            "UPDATE platform_deployment_runs
+             SET run_status='failed',error_code=:error_code,finished_at=:finished_at,updated_at=:updated_at
+             WHERE id=:id"
+        )->execute([
+            'error_code' => $errorCode,
+            'finished_at' => $now,
+            'updated_at' => $now,
+            'id' => $runId,
+        ]);
     }
 
     /** @return array<string,mixed> */
@@ -557,7 +675,9 @@ final class PlatformUpgradeService
     /** @return array<string,mixed>|null */
     private function runByPublicId(PDO $pdo, string $publicId): ?array
     {
-        $statement = $pdo->prepare('SELECT * FROM platform_deployment_runs WHERE public_id=:public_id LIMIT 1');
+        $statement = $pdo->prepare(
+            'SELECT * FROM platform_deployment_runs WHERE public_id=:public_id LIMIT 1'
+        );
         $statement->execute(['public_id' => $publicId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
@@ -569,24 +689,25 @@ final class PlatformUpgradeService
             return null;
         }
         $value = $pdo->query(
-            "SELECT release_version FROM platform_release_records WHERE release_status='active' ORDER BY id DESC LIMIT 1"
+            "SELECT release_version FROM platform_release_records
+             WHERE release_status='active' ORDER BY id DESC LIMIT 1"
         )->fetchColumn();
         return is_string($value) ? $value : null;
     }
 
     private function databaseIsEmpty(PDO $pdo): bool
     {
-        $statement = $pdo->query(
+        return (int) $pdo->query(
             "SELECT COUNT(*) FROM information_schema.tables
              WHERE table_schema=DATABASE() AND table_type='BASE TABLE'"
-        );
-        return (int) $statement->fetchColumn() === 0;
+        )->fetchColumn() === 0;
     }
 
     private function hasTable(PDO $pdo, string $table): bool
     {
         $statement = $pdo->prepare(
-            'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=:table'
+            'SELECT COUNT(*) FROM information_schema.tables
+             WHERE table_schema=DATABASE() AND table_name=:table'
         );
         $statement->execute(['table' => $table]);
         return (int) $statement->fetchColumn() === 1;
@@ -605,6 +726,7 @@ final class PlatformUpgradeService
         if ((int) $statement->fetchColumn() !== 1) {
             throw new RuntimeException('platform_deployment_lock_unavailable');
         }
+
         try {
             return $callback($pdo);
         } finally {
@@ -623,6 +745,7 @@ final class PlatformUpgradeService
         if (!is_dir($root) && !mkdir($root, 0700, true) && !is_dir($root)) {
             throw new RuntimeException('Unable to create the deployment journal directory.');
         }
+        @chmod($root, 0700);
         $path = $root . DIRECTORY_SEPARATOR . (string) $document['run_public_id'] . '.json';
         $this->atomicJson($path, $document);
         return $path;
