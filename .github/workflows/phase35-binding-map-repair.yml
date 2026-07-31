@@ -1,0 +1,65 @@
+name: Phase 35 Binding Map Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase35-binding-map-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Repair component and status binding maps
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('src/Reliability/ReliabilityControlCenterActionService.php')
+          text = path.read_text()
+
+          component_old = """                    'display_order' => $displayOrder,
+                    'created_by_user_id' => $actorId,
+                    'updated_by_user_id' => $actorId,
+                    'created' => $now,"""
+          component_new = """                    'display_order' => $displayOrder,
+                    'actor_id' => $actorId,
+                    'created' => $now,"""
+          if component_old in text:
+              text = text.replace(component_old, component_new, 1)
+          elif "'display_order' => $displayOrder,\n                    'actor_id' => $actorId," not in text:
+              raise SystemExit('Component binding anchor not found')
+
+          status_old = """                    'history' => $showHistory ? 1 : 0,
+                    'actor_id' => $actorId,
+                    'created' => $now,"""
+          status_new = """                    'history' => $showHistory ? 1 : 0,
+                    'created_by_user_id' => $actorId,
+                    'updated_by_user_id' => $actorId,
+                    'created' => $now,"""
+          if status_old in text:
+              text = text.replace(status_old, status_new, 1)
+          elif "'history' => $showHistory ? 1 : 0,\n                    'created_by_user_id' => $actorId," not in text:
+              raise SystemExit('Status settings binding anchor not found')
+
+          path.write_text(text)
+          PY
+          php -l src/Reliability/ReliabilityControlCenterActionService.php
+          git diff --check
+          if git diff --quiet -- src/Reliability/ReliabilityControlCenterActionService.php; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/Reliability/ReliabilityControlCenterActionService.php
+          git commit -m "Repair Phase 35 native PDO binding maps"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
