@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
 use PDO;
+use RuntimeException;
 use Vp3\Database;
 
 final class SecurityRateLimitService
@@ -52,40 +53,33 @@ final class SecurityRateLimitService
             $windowSeconds,
             $blockSeconds
         ): array {
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $nowString = $now->format('Y-m-d H:i:s.u');
+
+            $seed = $pdo->prepare(
+                'INSERT IGNORE INTO security_rate_limit_buckets
+                 (bucket_hash,scope_type,action_type,window_started_at,attempt_count,denied_count,
+                  blocked_until,last_request_id,created_at,updated_at)
+                 VALUES (:bucket_hash,:scope_type,:action_type,:window_started_at,0,0,NULL,
+                         NULL,:created_at,:updated_at)'
+            );
+            $seed->execute([
+                'bucket_hash' => $bucketHash,
+                'scope_type' => $scopeType,
+                'action_type' => $actionType,
+                'window_started_at' => $nowString,
+                'created_at' => $nowString,
+                'updated_at' => $nowString,
+            ]);
+
             $select = $pdo->prepare(
                 'SELECT window_started_at,attempt_count,denied_count,blocked_until
                  FROM security_rate_limit_buckets WHERE bucket_hash=:bucket_hash FOR UPDATE'
             );
             $select->execute(['bucket_hash' => $bucketHash]);
             $row = $select->fetch(PDO::FETCH_ASSOC);
-            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-            $nowString = $now->format('Y-m-d H:i:s.u');
-
             if (!is_array($row)) {
-                $insert = $pdo->prepare(
-                    'INSERT INTO security_rate_limit_buckets
-                     (bucket_hash,scope_type,action_type,window_started_at,attempt_count,denied_count,
-                      blocked_until,last_request_id,created_at,updated_at)
-                     VALUES (:bucket_hash,:scope_type,:action_type,:window_started_at,1,0,NULL,
-                             :last_request_id,:created_at,:updated_at)'
-                );
-                $insert->execute([
-                    'bucket_hash' => $bucketHash,
-                    'scope_type' => $scopeType,
-                    'action_type' => $actionType,
-                    'window_started_at' => $nowString,
-                    'last_request_id' => $requestId,
-                    'created_at' => $nowString,
-                    'updated_at' => $nowString,
-                ]);
-
-                return [
-                    'allowed' => true,
-                    'retry_after' => 0,
-                    'attempt_count' => 1,
-                    'blocked_until' => null,
-                    'bucket_hash' => $bucketHash,
-                ];
+                throw new RuntimeException('The security rate-limit bucket could not be loaded.');
             }
 
             $blockedUntil = $row['blocked_until'] === null
@@ -94,7 +88,7 @@ final class SecurityRateLimitService
             if ($blockedUntil !== null && $blockedUntil > $now) {
                 $denied = $pdo->prepare(
                     'UPDATE security_rate_limit_buckets
-                     SET denied_count=denied_count+1,last_request_id=:request_id,updated_at=:updated_at
+                     SET denied_count=denied_count + 1,last_request_id=:request_id,updated_at=:updated_at
                      WHERE bucket_hash=:bucket_hash'
                 );
                 $denied->execute([
@@ -117,15 +111,12 @@ final class SecurityRateLimitService
             $attemptCount = $windowExpired ? 1 : ((int) $row['attempt_count']) + 1;
             $newWindow = $windowExpired ? $nowString : $windowStarted->format('Y-m-d H:i:s.u');
             $allowed = $attemptCount <= $maxAttempts;
-            $newBlockedUntil = null;
-            if (!$allowed) {
-                $newBlockedUntil = $now->modify('+' . $blockSeconds . ' seconds');
-            }
+            $newBlockedUntil = $allowed ? null : $now->modify('+' . $blockSeconds . ' seconds');
 
             $update = $pdo->prepare(
                 'UPDATE security_rate_limit_buckets
                  SET window_started_at=:window_started_at,attempt_count=:attempt_count,
-                     denied_count=denied_count+:denied_increment,blocked_until=:blocked_until,
+                     denied_count=denied_count + :denied_increment,blocked_until=:blocked_until,
                      last_request_id=:last_request_id,updated_at=:updated_at
                  WHERE bucket_hash=:bucket_hash'
             );
