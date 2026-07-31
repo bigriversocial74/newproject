@@ -164,7 +164,7 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
+      - uses: shivammathur/setup-php@0c0c27b4cc611a83d6f7372e7f7f945ceb49a
         with:
           php-version: '8.3'
           extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
@@ -210,3 +210,31 @@ jobs:
           php tests/phase28_auth_request_session_transport_database_integration.php
           php tests/phase29_browser_request_integrity_database_integration.php
           php tests/phase30_security_audit_hardening_database_integration.php
+
+  commit_installer:
+    needs: [php, mysql8, mariadb1011]
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@0c0c27b4cb4cc611a83d6f7372e7f7f945ceb49a
+        with:
+          php-version: '8.3'
+          coverage: none
+      - name: Commit certified standalone installer when changed
+        run: |
+          php tools/build-single-install.php
+          if git diff --quiet -- database/vp3-single-install.sql; then
+            echo "The committed standalone installer already matches the deterministic build."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add database/vp3-single-install.sql
+          git commit -m "Commit certified standalone VP3 SQL installer"
+          git push origin HEAD:${{ github.head_ref }}
