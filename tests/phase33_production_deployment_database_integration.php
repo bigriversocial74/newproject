@@ -265,7 +265,9 @@ try {
     // Force a partially applied invalid migration and prove automatic database restore.
     $failureRoot = $temporaryRoot . '/failure-release';
     @mkdir($failureRoot . '/database/migrations', 0700, true);
-    @mkdir($failureRoot . '/workers', 0700, true);
+    foreach (['src', 'public', 'workers', 'tools'] as $sourceDirectory) {
+        @mkdir($failureRoot . '/' . $sourceDirectory, 0700, true);
+    }
     copy(
         $root . '/database/migrations/20260731_phase33_production_deployment_upgrade.sql',
         $failureRoot . '/database/migrations/20260731_phase33_production_deployment_upgrade.sql'
