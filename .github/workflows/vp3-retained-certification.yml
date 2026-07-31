@@ -9,12 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: vp3-retained-${{ github.event.pull_request.number || github.ref }}
+  group: vp3-retained-runner-recovery-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   php:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +34,7 @@ jobs:
         run: |
           find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
           for file in public/assets/*.js; do node --check "$file"; done
-      - name: Run retained Phase 2 through Phase 28 contracts
+      - name: Run retained Phase 2 through Phase 29 contracts
         run: |
           php tests/run.php
           php tests/phase3_contract.php
@@ -72,9 +72,10 @@ jobs:
           php tests/phase26_public_navigation_redirects_contract.php
           php tests/phase27_public_authentication_response_contract.php
           php tests/phase28_auth_request_session_transport_contract.php
+          php tests/phase29_browser_request_integrity_contract.php
 
   mysql8:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     services:
       mysql:
         image: mysql:8.0
@@ -102,7 +103,7 @@ jobs:
         run: |
           mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained database certification
+      - name: Run retained and Phase 29 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -134,9 +135,10 @@ jobs:
           php tests/phase26_public_navigation_redirects_database_integration.php
           php tests/phase27_public_authentication_response_database_integration.php
           php tests/phase28_auth_request_session_transport_database_integration.php
+          php tests/phase29_browser_request_integrity_database_integration.php
 
   mariadb1011:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     services:
       mariadb:
         image: mariadb:10.11
@@ -164,7 +166,7 @@ jobs:
         run: |
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained database certification
+      - name: Run retained and Phase 29 database certification
         env:
           VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
           VP3_TEST_DB_USER: root
@@ -196,3 +198,4 @@ jobs:
           php tests/phase26_public_navigation_redirects_database_integration.php
           php tests/phase27_public_authentication_response_database_integration.php
           php tests/phase28_auth_request_session_transport_database_integration.php
+          php tests/phase29_browser_request_integrity_database_integration.php
