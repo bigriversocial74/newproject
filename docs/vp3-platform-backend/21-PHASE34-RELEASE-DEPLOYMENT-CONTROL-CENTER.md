@@ -163,3 +163,7 @@ Phase 34 appends:
 6. Review copied promotion steps, event-chain integrity, and the corresponding Operations incident before resuming promotions.
 
 Never place target database credentials, release signing private keys, backup paths, or plaintext configuration secrets in the browser, central release records, logs, screenshots, support tickets, or PR comments.
+
+## Permanent certification gates
+
+The final Phase 34 branch head must pass the permanent four-job matrix on PHP 8.2, PHP 8.3, MySQL 8, and MariaDB 10.11. Every job regenerates the cumulative installer; database jobs import it twice and run retained Phase 30–34 native integration coverage. The committed `database/vp3-single-install.sql` must reproduce byte-for-byte, and no temporary repair workflow or payload may remain in the final diff.
