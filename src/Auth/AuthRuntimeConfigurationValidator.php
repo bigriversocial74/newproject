@@ -32,6 +32,15 @@ final class AuthRuntimeConfigurationValidator
             throw new RuntimeException('Production authentication cannot start from config-example.php.');
         }
 
+        $encoded = trim((string) ($auth['secret_encryption_key_base64'] ?? ''));
+        $decoded = base64_decode($encoded, true);
+        if (!is_string($decoded) || strlen($decoded) !== 32) {
+            throw new RuntimeException('AUTH_SECRET_ENCRYPTION_KEY_B64 must contain exactly 32 bytes in production.');
+        }
+        if (trim((string) ($auth['secret_encryption_key_id'] ?? '')) === '') {
+            throw new RuntimeException('AUTH_SECRET_ENCRYPTION_KEY_ID is required in production.');
+        }
+
         $baseUrl = trim((string) ($config['app']['base_url'] ?? ''));
         $parts = parse_url($baseUrl);
         $path = is_array($parts) ? (string) ($parts['path'] ?? '') : '';
@@ -52,15 +61,6 @@ final class AuthRuntimeConfigurationValidator
         }
         if (($config['app']['session_secure'] ?? false) !== true) {
             throw new RuntimeException('__Host- session cookies require APP_SESSION_SECURE=1 in production.');
-        }
-
-        $encoded = trim((string) ($auth['secret_encryption_key_base64'] ?? ''));
-        $decoded = base64_decode($encoded, true);
-        if (!is_string($decoded) || strlen($decoded) !== 32) {
-            throw new RuntimeException('AUTH_SECRET_ENCRYPTION_KEY_B64 must contain exactly 32 bytes in production.');
-        }
-        if (trim((string) ($auth['secret_encryption_key_id'] ?? '')) === '') {
-            throw new RuntimeException('AUTH_SECRET_ENCRYPTION_KEY_ID is required in production.');
         }
     }
 }
