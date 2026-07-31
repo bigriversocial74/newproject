@@ -12,11 +12,31 @@ use Vp3\Auth\AuthPublicException;
 
 final class AuthEndpoint
 {
+    private static ?AuthRequestIntegrity $requestIntegrity = null;
+
+    public static function configureRequestIntegrity(AuthRequestIntegrity $requestIntegrity): void
+    {
+        self::$requestIntegrity = $requestIntegrity;
+    }
+
     public static function requireMethod(string $method): void
     {
         PublicResponseGuard::enable();
         if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== strtoupper($method)) {
             JsonResponse::send(['error' => ['code' => 'method_not_allowed', 'message' => $method . ' required.']], 405);
+        }
+        if (self::$requestIntegrity === null) {
+            JsonResponse::send([
+                'error' => [
+                    'code' => 'request_integrity_unavailable',
+                    'message' => 'Request validation is temporarily unavailable.',
+                ],
+            ], 503);
+        }
+        try {
+            self::$requestIntegrity->assertTrusted($_SERVER);
+        } catch (Throwable $exception) {
+            self::sendException($exception);
         }
     }
 

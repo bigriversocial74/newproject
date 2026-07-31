@@ -10,10 +10,32 @@ final class SessionManager
 {
     private const APPLICATION_TOKEN_KEY = '_vp3_application_session';
     private const CSRF_KEY = '_csrf';
+    private const COOKIE_PATH = '/';
+    private const DEFAULT_SAME_SITE = 'Lax';
 
-    /** @param array{name:string,secure:bool} $config */
+    /** @param array{name:string,secure:bool,same_site?:string} $config */
     public function __construct(private readonly array $config)
     {
+        $name = trim((string) ($this->config['name'] ?? ''));
+        if ($name === '' || strlen($name) > 128 || preg_match('/^[A-Za-z0-9_-]+$/', $name) !== 1) {
+            throw new RuntimeException('The session cookie name is invalid.');
+        }
+        if (str_starts_with($name, '__Host-') && !$this->config['secure']) {
+            throw new RuntimeException('__Host- session cookies require Secure transport.');
+        }
+        $this->sameSite();
+    }
+
+    /** @return array{lifetime:int,path:string,secure:bool,httponly:bool,samesite:string} */
+    public function cookieParameters(): array
+    {
+        return [
+            'lifetime' => 0,
+            'path' => self::COOKIE_PATH,
+            'secure' => (bool) $this->config['secure'],
+            'httponly' => true,
+            'samesite' => $this->sameSite(),
+        ];
     }
 
     public function start(): void
@@ -22,19 +44,15 @@ final class SessionManager
             return;
         }
 
+        $parameters = $this->cookieParameters();
         ini_set('session.use_strict_mode', '1');
         ini_set('session.use_only_cookies', '1');
+        ini_set('session.use_trans_sid', '0');
+        ini_set('session.cookie_secure', $parameters['secure'] ? '1' : '0');
         ini_set('session.cookie_httponly', '1');
-        ini_set('session.cookie_samesite', 'Lax');
+        ini_set('session.cookie_samesite', $parameters['samesite']);
         session_name($this->config['name']);
-        session_set_cookie_params([
-            'lifetime' => 0,
-            'path' => '/',
-            'domain' => '',
-            'secure' => $this->config['secure'],
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ]);
+        session_set_cookie_params($parameters);
 
         if (!session_start()) {
             throw new RuntimeException('Unable to start session.');
@@ -96,15 +114,9 @@ final class SessionManager
         $this->start();
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
-            $params = session_get_cookie_params();
-            setcookie(session_name(), '', [
-                'expires' => time() - 42000,
-                'path' => $params['path'],
-                'domain' => $params['domain'],
-                'secure' => $params['secure'],
-                'httponly' => $params['httponly'],
-                'samesite' => $params['samesite'] ?? 'Lax',
-            ]);
+            $parameters = $this->cookieParameters();
+            unset($parameters['lifetime']);
+            setcookie(session_name(), '', ['expires' => time() - 42000] + $parameters);
         }
         session_destroy();
     }
@@ -124,5 +136,14 @@ final class SessionManager
         if ($token === '' || !hash_equals($expected, $token)) {
             throw new RuntimeException('Invalid CSRF token.');
         }
+    }
+
+    private function sameSite(): string
+    {
+        $value = ucfirst(strtolower(trim((string) ($this->config['same_site'] ?? self::DEFAULT_SAME_SITE))));
+        if (!in_array($value, ['Lax', 'Strict'], true)) {
+            throw new RuntimeException('Session SameSite must be Lax or Strict.');
+        }
+        return $value;
     }
 }
