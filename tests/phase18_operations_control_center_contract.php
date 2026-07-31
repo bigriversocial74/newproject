@@ -14,7 +14,7 @@ $required = [
     'public/assets/operations-control-center.js',
     'public/assets/operations-control-center.css',
     'tests/phase18_operations_control_center_database_integration.php',
-    '.github/workflows/phase18-operations-control-center.yml',
+    '.github/workflows/vp3-retained-certification.yml',
 ];
 foreach ($required as $path) {
     if (!is_file($root . '/' . $path)) {
@@ -32,7 +32,7 @@ $overviewEndpoint = $read('public/api/control-center/v1/operations-overview.php'
 $actionEndpoint = $read('public/api/control-center/v1/operations-action.php');
 $client = $read('public/assets/operations-control-center.js');
 $installer = $read('database/vp3-single-install.sql');
-$workflow = $read('.github/workflows/phase18-operations-control-center.yml');
+$workflow = $read('.github/workflows/vp3-retained-certification.yml');
 
 $assert = static function (bool $condition, string $message) use (&$failures): void {
     if (!$condition) {
@@ -117,8 +117,10 @@ $assert($phase10 !== false && $phase17 !== false && $phase10 < $phase17,
 $assert(str_contains($workflow, "php: ['8.2', '8.3']")
     && str_contains($workflow, 'mysql:8.0')
     && str_contains($workflow, 'mariadb:10.11')
-    && substr_count($workflow, 'vp3-single-install.sql') >= 4,
-    'Phase 18 workflow does not certify PHP 8.2/8.3 and repeated MySQL/MariaDB imports.');
+    && substr_count($workflow, 'vp3-single-install.sql') >= 4
+    && str_contains($workflow, 'php tests/phase18_operations_control_center_contract.php')
+    && substr_count($workflow, 'php tests/phase18_operations_control_center_database_integration.php') >= 2,
+    'Consolidated retained workflow does not certify Phase 18 on PHP 8.2/8.3 and repeated MySQL/MariaDB imports.');
 
 if ($failures !== []) {
     fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL);
