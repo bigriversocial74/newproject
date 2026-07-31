@@ -39,6 +39,7 @@ $respond = static function (array $document, int $exit = 0): never {
     fwrite(STDOUT, json_encode($document, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
     exit($exit);
 };
+$environment = 'development';
 
 try {
     if (!in_array($command, ['preflight', 'manifest', 'install', 'upgrade', 'verify', 'rollback'], true)) {
