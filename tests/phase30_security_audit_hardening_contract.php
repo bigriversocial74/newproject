@@ -72,3 +72,4 @@ if ($failures !== []) {
 }
 
 fwrite(STDOUT, "Phase 30 security audit hardening and standalone installer contract passed.\n");
+require __DIR__ . '/phase30_security_runtime_contract.php';
