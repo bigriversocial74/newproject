@@ -7,7 +7,7 @@ This installation path is for operators who deploy VP3 through a hosting control
 ## Installation sequence
 
 1. Download and extract the certified deployment ZIP.
-2. Rename `config/config-example.php` to `config/config.php`.
+2. Rename `config/config-example-browser.php` to `config/config.php`.
 3. Edit the clearly marked `$vp3LocalSettings` block at the top of `config/config.php`.
 4. Create an empty MySQL 8 or MariaDB 10.11 database.
 5. Import `database/vp3-single-install.sql` with phpMyAdmin or the hosting database manager.
@@ -16,9 +16,8 @@ This installation path is for operators who deploy VP3 through a hosting control
 
 ## Required config values
 
-The basic editable block contains:
+The short browser-editable config inherits the complete advanced defaults from `config/config-example.php`. Its editable block contains:
 
-- production environment
 - canonical HTTPS application URL
 - database DSN
 - database username
@@ -26,7 +25,7 @@ The basic editable block contains:
 - 32-byte base64 authentication encryption key
 - private first-user setup key
 
-Advanced deployments may override these values with protected environment variables, but environment variables are not required for the browser installation path.
+It automatically sets the application to production, enables secure sessions, enables one-time browser setup, and grants the first owner platform-operator access. Advanced deployments may still override settings with protected environment variables, but environment variables are not required for this browser installation path.
 
 ## First-administrator security boundary
 
@@ -42,7 +41,7 @@ Advanced deployments may override these values with protected environment variab
 - limits failed setup-key attempts within the setup session;
 - creates the owner and platform-operator grant in one outer transaction;
 - creates one verified active user, one active organization, and one active `customer_owner` membership;
-- grants the account platform-operator authority when enabled in config;
+- grants the account platform-operator authority;
 - permanently locks when either an account or user exists.
 
 The setup key and owner password are never written to deployment receipts or returned in the response.
