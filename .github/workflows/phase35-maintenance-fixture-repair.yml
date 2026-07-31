@@ -1,0 +1,52 @@
+name: Phase 35 Maintenance Fixture Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase35-maintenance-fixture-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Repair native PDO maintenance fixture
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/phase35_platform_reliability_slo_status_center_database_integration.php')
+          text = path.read_text()
+          old_sql = "'Phase 35 maintenance suppression',:user_id,:user_id,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)"
+          new_sql = "'Phase 35 maintenance suppression',:created_by_user_id,:approved_by_user_id,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)"
+          if old_sql in text:
+              text = text.replace(old_sql, new_sql, 1)
+          elif ':created_by_user_id,:approved_by_user_id' not in text:
+              raise SystemExit('Maintenance fixture SQL anchor not found')
+          old_params = "        'user_id' => $userId,\n        'environment_public_id' => $environmentPublicId,"
+          new_params = "        'created_by_user_id' => $userId,\n        'approved_by_user_id' => $userId,\n        'environment_public_id' => $environmentPublicId,"
+          if old_params in text:
+              text = text.replace(old_params, new_params, 1)
+          elif "'approved_by_user_id' => $userId" not in text:
+              raise SystemExit('Maintenance fixture parameter anchor not found')
+          path.write_text(text)
+          PY
+          php -l tests/phase35_platform_reliability_slo_status_center_database_integration.php
+          git diff --check
+          if git diff --quiet -- tests/phase35_platform_reliability_slo_status_center_database_integration.php; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add tests/phase35_platform_reliability_slo_status_center_database_integration.php
+          git commit -m "Repair Phase 35 native maintenance fixture"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
