@@ -37,6 +37,7 @@ $page = $read('public/security-center.php');
 $script = $read('public/assets/security-center.js');
 $style = $read('public/assets/security-center.css');
 $worker = $read('workers/security-incidents.php');
+$operationsWorker = $read('workers/operations.php');
 
 foreach (['security_incident_cases', 'security_incident_notes', 'security_alert_preferences', 'security_response_actions'] as $table) {
     $assert(str_contains($migration, 'CREATE TABLE IF NOT EXISTS ' . $table), 'Phase 32 migration is missing ' . $table . '.');
@@ -70,19 +71,30 @@ $assert(str_contains($preferences, 'automatic_promotion_enabled'), 'Alert prefer
 $assert(str_contains($preferences, 'notify_on_promotion'), 'Promotion notification preference is not persisted.');
 $assert(str_contains($preferences, 'notify_on_emergency_action'), 'Emergency notification preference is not persisted.');
 $assert(str_contains($preferences, 'suppressPromotionNotifications'), 'Disabled promotion alerts are not removed from the Operations queue.');
+$assert(str_contains($preferences, "source_type='security_response_action'"), 'Emergency alert routing is not idempotent by source response action.');
 $assert(str_contains($preferences, "'security_response_action'"), 'Emergency response alerts are not routed through Operations incidents.');
+
 $assert(str_contains($automation, 'p.automatic_promotion_enabled=1'), 'The automatic worker ignores the explicit account opt-in boundary.');
 $assert(str_contains($automation, 'FOR UPDATE'), 'Automatic event promotion does not lock its policy and evidence rows.');
 $assert(str_contains($automation, "'automatic_promote_event'"), 'Automatic event promotion lacks an immutable response receipt.');
 $assert(str_contains($automation, 'worker_id_hash'), 'Automatic promotion exposes or omits worker identity evidence.');
-$assert(str_contains($worker, 'VP3_SECURITY_INCIDENT_WORKER_ID'), 'The automatic promotion worker has no stable worker identity configuration.');
-$assert(str_contains($worker, 'SecurityIncidentAutomationService'), 'The worker bypasses the Phase 32 automation service.');
+foreach (["security.incident.%", "security.response.%", "security.reauthentication.%"] as $excludedNamespace) {
+    $assert(str_contains($automation, $excludedNamespace), 'Automatic promotion does not exclude internal namespace ' . $excludedNamespace . '.');
+}
+$assert(str_contains($automation, "security.alert_preferences.updated"), 'Automatic promotion can recursively promote policy-update evidence.');
+$assert(str_contains($worker, 'VP3_SECURITY_INCIDENT_WORKER_ID'), 'The dedicated automatic promotion worker has no stable worker identity configuration.');
+$assert(str_contains($worker, 'SecurityIncidentAutomationService'), 'The dedicated worker bypasses the Phase 32 automation service.');
+$assert(str_contains($operationsWorker, "['all', 'security', 'security-incidents']"), 'The retained Operations worker does not schedule Phase 32 promotion.');
+$assert(str_contains($operationsWorker, 'SecurityIncidentAutomationService'), 'The retained Operations worker bypasses the Phase 32 automation service.');
+$assert(strpos($operationsWorker, 'runPass(') < strpos($operationsWorker, 'processNextNotification('), 'Security promotion does not run before same-pass notification delivery.');
 
 $assert(str_contains($resolution, "'security.resolve_incident_case'"), 'Case closure is not context-bound to sensitive-action reauthentication.');
 $assert(str_contains($resolution, '$this->reauthentication->consume('), 'Case closure does not consume a one-time reauthentication challenge.');
 $assert(str_contains($resolution, '$this->incidents->resolve('), 'Security case closure does not resolve the linked operational incident.');
 $assert(str_contains($resolution, "case_status='resolved'"), 'Security case closure does not persist resolved state.');
 $assert(str_contains($resolution, "'resolve_case'"), 'Case resolution lacks an immutable response receipt.');
+$assert(str_contains($resolution, 'resolutionEvidence'), 'Resolution replays are not bound to canonical resolution evidence.');
+$assert(str_contains($resolution, 'hash_equals((string) $prior[\'evidence_hash\'], $expected)'), 'Resolution replay does not authenticate the stored evidence hash.');
 
 $assert(str_contains($query, 'securityCases'), 'The Security Center does not expose Phase 32 cases.');
 $assert(str_contains($query, 'responders'), 'The Security Center does not expose eligible responders.');
