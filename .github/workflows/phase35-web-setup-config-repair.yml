@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-      - name: Make config example rename-and-edit ready
+      - name: Make config example and certification browser-setup ready
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -79,18 +79,33 @@ $vp3LocalSettings = [
               if anchor not in text:
                   raise SystemExit('Config setup section anchor not found')
               text = text.replace(anchor, setup_block + anchor, 1)
-
           path.write_text(text)
+
+          contract = Path('tests/phase35_platform_reliability_slo_status_center_contract.php')
+          contract_text = contract.read_text()
+          contract_require = "require __DIR__ . '/phase35_web_first_administrator_setup_contract.php';"
+          if contract_require not in contract_text:
+              contract_text = contract_text.rstrip() + "\n\n" + contract_require + "\n"
+              contract.write_text(contract_text)
+
+          integration = Path('tests/phase35_platform_reliability_slo_status_center_database_integration.php')
+          integration_text = integration.read_text()
+          integration_require = "require __DIR__ . '/phase35_web_first_administrator_setup_database_integration.php';"
+          if integration_require not in integration_text:
+              integration_text = integration_text.rstrip() + "\n\n" + integration_require + "\n"
+              integration.write_text(integration_text)
           PY
           php -l config/config-example.php
+          php -l tests/phase35_platform_reliability_slo_status_center_contract.php
+          php -l tests/phase35_platform_reliability_slo_status_center_database_integration.php
           php tests/phase35_web_first_administrator_setup_contract.php
           git diff --check
-          if git diff --quiet -- config/config-example.php; then
-            echo "Editable config example already current."
+          if git diff --quiet -- config/config-example.php tests/phase35_platform_reliability_slo_status_center_contract.php tests/phase35_platform_reliability_slo_status_center_database_integration.php; then
+            echo "Browser setup configuration and certification wiring already current."
             exit 0
           fi
           git config user.name "vp3-certification-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add config/config-example.php
-          git commit -m "Make VP3 config example browser-install ready"
+          git add config/config-example.php tests/phase35_platform_reliability_slo_status_center_contract.php tests/phase35_platform_reliability_slo_status_center_database_integration.php
+          git commit -m "Wire browser first-administrator setup certification"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
