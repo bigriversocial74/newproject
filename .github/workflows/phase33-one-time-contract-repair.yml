@@ -1,0 +1,45 @@
+name: Phase 33 One-Time Retained Contract Repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase33-contract-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Make Phase 32 manifest assertion future-safe
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/phase32_security_incident_automation_contract.php')
+          text = path.read_text()
+          old = "$assert(end($manifestEntries) === 'migrations/20260731_phase32_security_incident_automation.sql', 'Phase 32 is not the current final migration in the standalone installer manifest.');"
+          new = """$phase32Index = array_search('migrations/20260731_phase32_security_incident_automation.sql', $manifestEntries, true);
+          $assert($phase32Index !== false, 'Phase 32 migration is absent from the ordered installer manifest.');
+          if ($phase32Index !== false && isset($manifestEntries[$phase32Index + 1])) {
+              $assert($manifestEntries[$phase32Index + 1] === 'migrations/20260731_phase33_production_deployment_upgrade.sql', 'Phase 32 is not immediately followed by the Phase 33 deployment migration.');
+          }"""
+          if old not in text:
+              print('Phase 32 retained assertion is already repaired.')
+          else:
+              path.write_text(text.replace(old, new, 1))
+          PY
+          if git diff --quiet -- tests/phase32_security_incident_automation_contract.php; then
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add tests/phase32_security_incident_automation_contract.php
+          git commit -m "Make Phase 32 installer contract future-safe"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
