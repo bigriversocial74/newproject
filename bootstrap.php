@@ -28,6 +28,8 @@ use Vp3\Deployments\PodHealthService;
 use Vp3\DomainCodes\DomainRegistryService;
 use Vp3\HomeServers\HomeServerLeaseSigner;
 use Vp3\HomeServers\HomeServerRegistryService;
+use Vp3\Http\AuthEndpoint;
+use Vp3\Http\AuthRequestIntegrity;
 use Vp3\Http\SessionManager;
 use Vp3\Infrastructure\InfrastructureProviderService;
 use Vp3\Infrastructure\ProviderSecretCipher;
@@ -71,6 +73,8 @@ $authRuntimeConfigurationValidator = new AuthRuntimeConfigurationValidator();
 $authRuntimeConfigurationValidator->validate($config, $usingExampleConfig);
 $environment = strtolower((string) $config['app']['env']);
 $queueLeaseSeconds = (int) $config['queue']['lease_seconds'];
+$authRequestIntegrity = new AuthRequestIntegrity((string) $config['app']['base_url'], $environment);
+AuthEndpoint::configureRequestIntegrity($authRequestIntegrity);
 
 $database = new Database($config['database']);
 $passwordPolicy = new PasswordPolicy((int) $config['auth']['password_min_length']);
@@ -167,6 +171,7 @@ return [
     'config' => $config,
     'runtime_configuration_validator' => $runtimeConfigurationValidator,
     'auth_runtime_configuration_validator' => $authRuntimeConfigurationValidator,
+    'auth_request_integrity' => $authRequestIntegrity,
     'database' => $database,
     'auth_audit' => $authAudit,
     'mail_adapter' => $mailAdapter,
