@@ -37,6 +37,10 @@ final class SecurityIncidentAutomationService
              LEFT JOIN security_incident_cases c ON c.source_audit_event_id=e.id
              WHERE c.id IS NULL
                AND p.automatic_promotion_enabled=1
+               AND e.event_type NOT LIKE 'security.incident.%'
+               AND e.event_type NOT LIKE 'security.response.%'
+               AND e.event_type NOT LIKE 'security.reauthentication.%'
+               AND e.event_type<>'security.alert_preferences.updated'
                AND (
                  (CASE e.risk_level WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END)
                    >= (CASE p.minimum_risk WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END)
@@ -233,6 +237,13 @@ final class SecurityIncidentAutomationService
     /** @param array<string,mixed> $event @param array<string,mixed> $policy */
     private function qualifies(array $event, array $policy): bool
     {
+        $eventType = (string) $event['event_type'];
+        if (str_starts_with($eventType, 'security.incident.')
+            || str_starts_with($eventType, 'security.response.')
+            || str_starts_with($eventType, 'security.reauthentication.')
+            || $eventType === 'security.alert_preferences.updated') {
+            return false;
+        }
         $risk = self::RISK_RANK[(string) $event['risk_level']] ?? 0;
         $minimum = self::RISK_RANK[(string) $policy['minimum_risk']] ?? self::RISK_RANK['high'];
         return $risk >= $minimum
