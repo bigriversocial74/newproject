@@ -219,8 +219,8 @@ final class SecurityCenterQueryService
     private function alertPreferences(int $accountId): array
     {
         $statement = $this->database->pdo()->prepare(
-            'SELECT minimum_risk,include_integrity_failures,notify_on_promotion,
-                    notify_on_emergency_action,updated_at
+            'SELECT automatic_promotion_enabled,minimum_risk,include_integrity_failures,
+                    notify_on_promotion,notify_on_emergency_action,updated_at
              FROM security_alert_preferences WHERE account_scope=:account LIMIT 1'
         );
         $statement->execute(['account' => $accountId]);
@@ -236,7 +236,7 @@ final class SecurityCenterQueryService
             ];
         }
         return [
-            'automatic_promotion_enabled' => true,
+            'automatic_promotion_enabled' => (bool) $row['automatic_promotion_enabled'],
             'minimum_risk' => (string) $row['minimum_risk'],
             'include_integrity_failures' => (bool) $row['include_integrity_failures'],
             'notify_on_promotion' => (bool) $row['notify_on_promotion'],
