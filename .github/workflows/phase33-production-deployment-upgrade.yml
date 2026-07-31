@@ -33,9 +33,11 @@ jobs:
               php tests/phase30_security_audit_hardening_contract.php &&
               php tests/phase31_security_center_contract.php &&
               php tests/phase32_security_incident_automation_contract.php &&
-              php tests/phase33_production_deployment_contract.php
+              php tests/phase33_production_deployment_contract.php &&
+              php tests/phase33_operator_controls_contract.php
             '
-      - name: Upload generated standalone installer
+          git diff --exit-code -- database/vp3-single-install.sql
+      - name: Upload certified standalone installer
         if: matrix.php == '8.3'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -66,9 +68,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mysql-client
           php -r '$required=["pdo","pdo_mysql","json","mbstring","openssl","sodium","zip"]; foreach($required as $extension){if(!extension_loaded($extension)){fwrite(STDERR,"Missing {$extension}\n");exit(1);}}'
-      - name: Generate and import standalone installer twice
+      - name: Verify and import committed standalone installer twice
         run: |
           php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
           ! grep -Eq "^[[:space:]]*SOURCE[[:space:]]" database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
           mysql -h 127.0.0.1 -uroot -proot vp3_test < database/vp3-single-install.sql
@@ -85,6 +88,7 @@ jobs:
           php tests/phase32_security_operations_database_integration.php
           php tests/phase32_assignment_replay_database_integration.php
           php tests/phase33_production_deployment_database_integration.php
+          php tests/phase33_operator_controls_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-24.04
@@ -108,9 +112,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y php-cli php-mysql php-mbstring php-zip mariadb-client
           php -r '$required=["pdo","pdo_mysql","json","mbstring","openssl","sodium","zip"]; foreach($required as $extension){if(!extension_loaded($extension)){fwrite(STDERR,"Missing {$extension}\n");exit(1);}}'
-      - name: Generate and import standalone installer twice
+      - name: Verify and import committed standalone installer twice
         run: |
           php tools/build-single-install.php
+          git diff --exit-code -- database/vp3-single-install.sql
           ! grep -Eq "^[[:space:]]*SOURCE[[:space:]]" database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
           mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < database/vp3-single-install.sql
@@ -127,26 +132,4 @@ jobs:
           php tests/phase32_security_operations_database_integration.php
           php tests/phase32_assignment_replay_database_integration.php
           php tests/phase33_production_deployment_database_integration.php
-
-  commit-installer:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    needs: [php, mysql8, mariadb1011]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-      - name: Commit certified Phase 33 standalone installer
-        run: |
-          php tools/build-single-install.php
-          if git diff --quiet -- database/vp3-single-install.sql; then
-            echo "Standalone SQL is already current."
-            exit 0
-          fi
-          git config user.name "vp3-certification-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add database/vp3-single-install.sql
-          git commit -m "Commit complete Phase 33 standalone SQL installer"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          php tests/phase33_operator_controls_database_integration.php
