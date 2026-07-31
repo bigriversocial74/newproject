@@ -46,7 +46,7 @@ if (is_file($autoload)) {
 
 try {
     if (!is_file($configPath)) {
-        $message = 'Rename config/config-example-browser.php to config/config.php, update the marked settings, then reload this page.';
+        $message = 'Rename config/config-example-browser.php to config/config.php, enter your domain and database values, then reload this page.';
     } else {
         $config = require $configPath;
         if (!is_array($config)) {
@@ -73,7 +73,6 @@ try {
 
         $setup = (array) ($config['setup'] ?? []);
         $setupEnabled = (bool) ($setup['enabled'] ?? false);
-        $setupKey = trim((string) ($setup['first_user_key'] ?? ''));
         $operatorGrantEnabled = (bool) ($setup['grant_platform_operator_to_first_owner'] ?? true);
         $authKeyEncoded = (string) (($config['auth']['secret_encryption_key_base64'] ?? ''));
         $authKey = base64_decode($authKeyEncoded, true);
@@ -86,14 +85,11 @@ try {
                 && !isset($baseUrlParts['user'], $baseUrlParts['pass'], $baseUrlParts['query'], $baseUrlParts['fragment']));
 
         if (!$setupEnabled
-            || strlen($setupKey) < 20
-            || str_contains(strtoupper($setupKey), 'CHANGE_THIS')
             || !is_string($authKey)
             || strlen($authKey) !== 32
-            || str_contains(strtoupper($authKeyEncoded), 'CHANGE_THIS')
             || !$productionOriginValid) {
             $state = 'config_invalid';
-            $message = 'Finish the marked setup values in config/config.php. Use a private setup key, a valid 32-byte base64 encryption key, and an HTTPS production URL.';
+            $message = 'VP3 could not finish the automatic configuration. Confirm the HTTPS domain and that the config directory is writable.';
         } else {
             $database = new Database((array) ($config['database'] ?? []));
             $pdo = $database->pdo();
@@ -127,29 +123,13 @@ try {
     }
 } catch (Throwable) {
     $state = 'error';
-    $message = 'VP3 could not validate the configuration or database. Check the values in config/config.php.';
+    $message = 'VP3 could not validate the configuration or database. Check the domain and database values in config/config.php.';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $setupAvailable && is_array($config) && $database instanceof Database) {
-    $now = time();
-    $attemptWindow = (array) ($_SESSION['vp3_setup_attempts'] ?? ['started_at' => $now, 'count' => 0]);
-    if (($now - (int) ($attemptWindow['started_at'] ?? 0)) > 900) {
-        $attemptWindow = ['started_at' => $now, 'count' => 0];
-    }
-
     try {
-        if ((int) ($attemptWindow['count'] ?? 0) >= 5) {
-            throw new RuntimeException('Too many setup attempts. Reload after 15 minutes.');
-        }
         if (!hash_equals((string) $_SESSION['vp3_setup_csrf'], (string) ($_POST['csrf_token'] ?? ''))) {
             throw new RuntimeException('The setup form expired. Reload and try again.');
-        }
-        $configuredSetupKey = (string) (($config['setup']['first_user_key'] ?? ''));
-        $submittedSetupKey = trim((string) ($_POST['setup_key'] ?? ''));
-        if (!hash_equals($configuredSetupKey, $submittedSetupKey)) {
-            $attemptWindow['count'] = (int) ($attemptWindow['count'] ?? 0) + 1;
-            $_SESSION['vp3_setup_attempts'] = $attemptWindow;
-            throw new RuntimeException('The setup key is not correct.');
         }
 
         $password = (string) ($_POST['password'] ?? '');
@@ -207,14 +187,13 @@ if ($baseUrl === '') {
 <?php if ($message !== null): ?><div class="status <?= $state === 'complete' ? 'complete' : ($state === 'error' || $errors !== [] ? 'error' : '') ?>"><?= $escape($message) ?></div><?php endif; ?>
 <?php foreach ($errors as $error): ?><div class="status error"><?= $escape($error) ?></div><?php endforeach; ?>
 <?php if ($state === 'config_missing'): ?>
-<ol class="steps"><li>Rename <code>config/config-example-browser.php</code> to <code>config/config.php</code>.</li><li>Update the marked domain, database, encryption key, and setup-key values.</li><li>Import <code>database/vp3-single-install.sql</code>.</li><li>Reload this page.</li></ol>
+<ol class="steps"><li>Rename <code>config/config-example-browser.php</code> to <code>config/config.php</code>.</li><li>Enter only your domain and database values.</li><li>Import <code>database/vp3-single-install.sql</code>.</li><li>Reload this page.</li></ol>
 <?php elseif ($state === 'database_not_installed'): ?>
 <ol class="steps"><li>Open phpMyAdmin or your hosting database manager.</li><li>Select the configured database.</li><li>Import <code>database/vp3-single-install.sql</code>.</li><li>Reload this page.</li></ol>
 <?php elseif ($state === 'ready'): ?>
 <form method="post" action="" autocomplete="off">
 <input type="hidden" name="csrf_token" value="<?= $escape((string) $_SESSION['vp3_setup_csrf']) ?>">
 <div class="grid">
-<div class="field full"><label for="setup_key">Private setup key</label><input id="setup_key" name="setup_key" type="password" required autocomplete="off"></div>
 <div class="field"><label for="display_name">Your name</label><input id="display_name" name="display_name" type="text" required maxlength="190" autocomplete="name"></div>
 <div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" required maxlength="254" autocomplete="email"></div>
 <div class="field full"><label for="account_name">Organization name</label><input id="account_name" name="account_name" type="text" required maxlength="190" value="VP3" autocomplete="organization"></div>
@@ -224,7 +203,7 @@ if ($baseUrl === '') {
 <?php elseif ($state === 'complete' && is_array($result)): ?>
 <p>Save these public identities with your deployment records:</p><p class="meta">Account: <?= $escape((string) $result['account_public_id']) ?></p><p class="meta">User: <?= $escape((string) $result['user_public_id']) ?></p><p class="meta">Platform operator: <?= ($result['platform_operator'] ?? false) ? 'active' : 'not granted' ?></p><p><a href="<?= $escape($baseUrl) ?>">Continue to VP3</a></p>
 <?php endif; ?>
-</section><div class="footer">The setup key and password are never written to the page response or deployment receipts.</div>
+</section><div class="footer">VP3 generates its encryption key automatically. Your administrator password is never written to the page response or deployment receipts.</div>
 </main>
 </body>
 </html>
