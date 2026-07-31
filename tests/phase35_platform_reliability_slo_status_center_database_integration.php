@@ -249,13 +249,14 @@ try {
           created_by_user_id,approved_by_user_id,created_at,updated_at)
          SELECT :public_id,e.id,:account_id,:request_id,'open',
                 DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 MINUTE),DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 30 MINUTE),
-                'Phase 35 maintenance suppression',:user_id,:user_id,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)
+                'Phase 35 maintenance suppression',:created_by_user_id,:approved_by_user_id,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)
          FROM platform_deployment_environments e WHERE e.public_id=:environment_public_id"
     )->execute([
         'public_id' => $windowPublicId,
         'account_id' => $accountId,
         'request_id' => 'phase35-window-' . $suffix,
-        'user_id' => $userId,
+        'created_by_user_id' => $userId,
+        'approved_by_user_id' => $userId,
         'environment_public_id' => $environmentPublicId,
     ]);
     $setDue();
