@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vp3\Http;
 
 use InvalidArgumentException;
+use Throwable;
 use Vp3\Auth\AuthPublicException;
 
 final class AuthRequestIntegrity
@@ -23,12 +24,23 @@ final class AuthRequestIntegrity
     /** @param array<string,mixed> $server */
     public function assertTrusted(array $server): void
     {
-        $hostHeader = trim((string) ($server['HTTP_HOST'] ?? $server['SERVER_NAME'] ?? ''));
-        if ($hostHeader === '') {
-            if ($this->sourceRequired) {
-                $this->reject();
-            }
-        } elseif (!hash_equals($this->authority, $this->authorityFromHostHeader($hostHeader))) {
+        try {
+            $this->assertTrustedHeaders($server);
+        } catch (AuthPublicException $exception) {
+            throw $exception;
+        } catch (Throwable) {
+            $this->reject();
+        }
+    }
+
+    /** @param array<string,mixed> $server */
+    private function assertTrustedHeaders(array $server): void
+    {
+        $hostHeader = trim((string) ($server['HTTP_HOST'] ?? ''));
+        if ($hostHeader === '' && !$this->sourceRequired) {
+            $hostHeader = trim((string) ($server['SERVER_NAME'] ?? ''));
+        }
+        if ($hostHeader === '' || !hash_equals($this->authority, $this->authorityFromHostHeader($hostHeader))) {
             $this->reject();
         }
 
