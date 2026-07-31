@@ -72,7 +72,12 @@ final class InitialOwnerBootstrapService
                 throw new RuntimeException('initial_owner_bootstrap_request_conflict');
             }
 
-            $pdo->query('SELECT GET_LOCK(\'vp3-initial-owner-bootstrap\',0)')->fetchColumn();
+            $lockAcquired = (int) $pdo->query(
+                'SELECT GET_LOCK(\'vp3-initial-owner-bootstrap\',0)'
+            )->fetchColumn();
+            if ($lockAcquired !== 1) {
+                throw new RuntimeException('initial_owner_bootstrap_lock_unavailable');
+            }
             try {
                 $accountCount = (int) $pdo->query('SELECT COUNT(*) FROM accounts')->fetchColumn();
                 $userCount = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
