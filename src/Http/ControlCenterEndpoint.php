@@ -14,10 +14,32 @@ final class ControlCenterEndpoint
 {
     public const MAX_JSON_BYTES = 65536;
 
+    private static ?BrowserRequestIntegrity $requestIntegrity = null;
+
+    public static function configureRequestIntegrity(BrowserRequestIntegrity $requestIntegrity): void
+    {
+        self::$requestIntegrity = $requestIntegrity;
+    }
+
     public static function requireMethod(string $method): void
     {
-        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== strtoupper($method)) {
-            JsonResponse::send(['error' => ['code' => 'method_not_allowed', 'message' => $method . ' required.']], 405);
+        PublicResponseGuard::enable();
+        $requiredMethod = strtoupper($method);
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== $requiredMethod) {
+            JsonResponse::send(['error' => ['code' => 'method_not_allowed', 'message' => $requiredMethod . ' required.']], 405);
+        }
+        if (self::$requestIntegrity === null) {
+            JsonResponse::send([
+                'error' => [
+                    'code' => 'request_integrity_unavailable',
+                    'message' => 'Request validation is temporarily unavailable.',
+                ],
+            ], 503);
+        }
+        try {
+            self::$requestIntegrity->assertTrustedMutation($_SERVER, $requiredMethod);
+        } catch (Throwable $exception) {
+            self::sendException($exception);
         }
     }
 
