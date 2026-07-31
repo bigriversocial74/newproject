@@ -1,0 +1,49 @@
+name: Phase 35 Materialize Permanent Files
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase35-materialize-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Verify and materialize Phase 35 files
+        run: |
+          set -euo pipefail
+          test -d .phase35-payload || { echo "Payload already materialized."; exit 0; }
+          cat \
+            .phase35-payload/chunk-00.b64 \
+            .phase35-payload/chunk-01.b64 \
+            .phase35-payload/chunk-02.b64 \
+            .phase35-payload/chunk-03.b64 \
+            .phase35-payload/chunk-04.b64 \
+            .phase35-payload/chunk-05.b64 \
+            .phase35-payload/chunk-06.b64 \
+            | base64 --decode > /tmp/phase35-app.tar.gz
+          echo "e820e9bba2527675f4a6d785324181a5791b36ce4d1d8b4208dbf0a418fa1eac  /tmp/phase35-app.tar.gz" | sha256sum -c -
+          tar -tzf /tmp/phase35-app.tar.gz >/dev/null
+          tar -xzf /tmp/phase35-app.tar.gz -C .
+          rm -rf .phase35-payload
+          find src public tests config workers tools -name '*.php' -print0 | xargs -0 -n1 php -l
+          for file in public/assets/*.js; do node --check "$file"; done
+          git diff --check
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No materialization changes remain."
+            exit 0
+          fi
+          git commit -m "Materialize Phase 35 reliability implementation"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
