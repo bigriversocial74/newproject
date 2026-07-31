@@ -86,6 +86,7 @@ final class SecurityAuditService
             $requestId,
             $correlationId,
             $safeMetadata,
+            $metadataJson,
             $metadataHash,
             $ipHash,
             $userAgentHash
