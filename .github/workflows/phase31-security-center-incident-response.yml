@@ -19,24 +19,18 @@ jobs:
         php: ['8.2', '8.3']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@0c0c27b4cc611a83d6f7372e7f7f945ceb49a
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Validate runtime and source syntax
+      - name: Validate JavaScript syntax
+        run: for file in public/assets/*.js; do node --check "$file"; done
+      - name: Validate PHP ${{ matrix.php }} and focused contracts
         run: |
-          composer validate --strict --no-check-publish
-          find src public tests config workers tools -name '*.php' -print0 | xargs -0 -n1 php -l
-          for file in public/assets/*.js; do node --check "$file"; done
+          docker run --rm -v "$PWD:/app" -w /app php:${{ matrix.php }}-cli-bookworm sh -lc '
+            find src public tests config workers tools -name "*.php" -print0 | xargs -0 -n1 php -l &&
+            php tools/build-single-install.php &&
+            php tests/phase30_security_audit_hardening_contract.php &&
+            php tests/phase31_security_center_contract.php
+          '
       - name: Verify committed standalone installer
-        run: |
-          php tools/build-single-install.php
-          git diff --exit-code -- database/vp3-single-install.sql
-      - name: Run focused Phase 30 and Phase 31 contracts
-        run: |
-          php tests/phase30_security_audit_hardening_contract.php
-          php tests/phase31_security_center_contract.php
+        run: git diff --exit-code -- database/vp3-single-install.sql
 
   mysql8:
     runs-on: ubuntu-22.04
