@@ -57,25 +57,21 @@ final class SecurityAlertPreferenceService
             $notifyOnEmergencyAction
         ): void {
             $this->assertManager($pdo, $accountId, $userId, $role, true);
-            if (!$enabled) {
-                $pdo->prepare('DELETE FROM security_alert_preferences WHERE account_scope=:account')
-                    ->execute(['account' => $accountId]);
-                return;
-            }
-
             $now = $this->now();
             $pdo->prepare(
                 'INSERT INTO security_alert_preferences
-                 (account_scope,minimum_risk,include_integrity_failures,notify_on_promotion,
-                  notify_on_emergency_action,updated_by_user_id,created_at,updated_at)
-                 VALUES (:account,:minimum_risk,:include_integrity,:notify_promotion,:notify_emergency,:user,:created,:updated)
-                 ON DUPLICATE KEY UPDATE minimum_risk=VALUES(minimum_risk),
-                   include_integrity_failures=VALUES(include_integrity_failures),
+                 (account_scope,automatic_promotion_enabled,minimum_risk,include_integrity_failures,
+                  notify_on_promotion,notify_on_emergency_action,updated_by_user_id,created_at,updated_at)
+                 VALUES (:account,:automatic_enabled,:minimum_risk,:include_integrity,
+                         :notify_promotion,:notify_emergency,:user,:created,:updated)
+                 ON DUPLICATE KEY UPDATE automatic_promotion_enabled=VALUES(automatic_promotion_enabled),
+                   minimum_risk=VALUES(minimum_risk),include_integrity_failures=VALUES(include_integrity_failures),
                    notify_on_promotion=VALUES(notify_on_promotion),
                    notify_on_emergency_action=VALUES(notify_on_emergency_action),
                    updated_by_user_id=VALUES(updated_by_user_id),updated_at=VALUES(updated_at)'
             )->execute([
                 'account' => $accountId,
+                'automatic_enabled' => $enabled ? 1 : 0,
                 'minimum_risk' => $minimumRisk,
                 'include_integrity' => $includeIntegrityFailures ? 1 : 0,
                 'notify_promotion' => $notifyOnPromotion ? 1 : 0,
@@ -114,8 +110,8 @@ final class SecurityAlertPreferenceService
     public function policyForAccount(int $accountId): array
     {
         $statement = $this->database->pdo()->prepare(
-            'SELECT minimum_risk,include_integrity_failures,notify_on_promotion,
-                    notify_on_emergency_action,updated_at
+            'SELECT automatic_promotion_enabled,minimum_risk,include_integrity_failures,
+                    notify_on_promotion,notify_on_emergency_action,updated_at
              FROM security_alert_preferences WHERE account_scope=:account LIMIT 1'
         );
         $statement->execute(['account' => $accountId]);
@@ -132,7 +128,7 @@ final class SecurityAlertPreferenceService
         }
 
         return [
-            'automatic_promotion_enabled' => true,
+            'automatic_promotion_enabled' => (bool) $row['automatic_promotion_enabled'],
             'minimum_risk' => (string) $row['minimum_risk'],
             'include_integrity_failures' => (bool) $row['include_integrity_failures'],
             'notify_on_promotion' => (bool) $row['notify_on_promotion'],
@@ -155,7 +151,7 @@ final class SecurityAlertPreferenceService
     public function routeEmergencyAction(int $accountId, int $actorUserId, string $requestId): void
     {
         $policy = $this->policyForAccount($accountId);
-        if (!$policy['automatic_promotion_enabled'] || !$policy['notify_on_emergency_action']) {
+        if (!$policy['notify_on_emergency_action']) {
             return;
         }
 
