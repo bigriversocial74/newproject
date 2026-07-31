@@ -80,6 +80,7 @@ jobs:
           php tests/phase30_security_audit_hardening_database_integration.php
           php tests/phase32_security_incident_automation_database_integration.php
           php tests/phase32_security_operations_database_integration.php
+          php tests/phase32_assignment_replay_database_integration.php
 
   mariadb1011:
     runs-on: ubuntu-22.04
@@ -119,3 +120,4 @@ jobs:
           php tests/phase30_security_audit_hardening_database_integration.php
           php tests/phase32_security_incident_automation_database_integration.php
           php tests/phase32_security_operations_database_integration.php
+          php tests/phase32_assignment_replay_database_integration.php
