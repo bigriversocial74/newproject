@@ -167,6 +167,16 @@ final class SecurityAlertPreferenceService
             return;
         }
 
+        $existing = $this->database->pdo()->prepare(
+            "SELECT id FROM operational_incidents
+             WHERE account_scope=:account AND source_type='security_response_action' AND source_id=:source_id
+             LIMIT 1"
+        );
+        $existing->execute(['account' => $accountId, 'source_id' => (int) $action['id']]);
+        if (is_numeric($existing->fetchColumn())) {
+            return;
+        }
+
         $this->incidents->open(
             $accountId,
             'security_response_action',
