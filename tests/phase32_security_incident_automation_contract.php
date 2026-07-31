@@ -38,6 +38,7 @@ $script = $read('public/assets/security-center.js');
 $style = $read('public/assets/security-center.css');
 $worker = $read('workers/security-incidents.php');
 $operationsWorker = $read('workers/operations.php');
+$assignmentProof = $read('tests/phase32_assignment_replay_database_integration.php');
 
 foreach (['security_incident_cases', 'security_incident_notes', 'security_alert_preferences', 'security_response_actions'] as $table) {
     $assert(str_contains($migration, 'CREATE TABLE IF NOT EXISTS ' . $table), 'Phase 32 migration is missing ' . $table . '.');
@@ -57,6 +58,9 @@ $assert(str_contains($response, 'OperationsSecretCipher'), 'Security analyst not
 $assert(str_contains($response, 'security_incident_notes'), 'Encrypted security notes are not persisted.');
 $assert(!str_contains($response, 'note_plaintext'), 'Security note plaintext is persisted by name.');
 $assert(str_contains($response, "'support_member'"), 'Assigned support responders are not represented in the response boundary.');
+$assert(str_contains($response, 'assignmentReplayMatches'), 'Case-assignment replays are not authenticated against case and responder identities.');
+$assert(str_contains($response, 'security_response_request_conflict'), 'Conflicting request-ID reuse is not rejected.');
+$assert(str_contains($response, 'security_case_resolved'), 'Resolved security cases can still be reassigned.');
 $assert(str_contains($response, 'security.emergency_revoke_sessions'), 'Emergency session revocation is not context-bound to reauthentication.');
 $assert(str_contains($response, "revocation_reason='security_incident_response'"), 'Emergency session revocation lacks an explicit reason.');
 $assert(str_contains($response, 'revoked_by_user_id=:actor_user_id'), 'Emergency session revocation does not preserve the acting administrator.');
@@ -100,18 +104,25 @@ $assert(str_contains($query, 'securityCases'), 'The Security Center does not exp
 $assert(str_contains($query, 'responders'), 'The Security Center does not expose eligible responders.');
 $assert(str_contains($query, 'security_incident_notes'), 'The Security Center does not load encrypted analyst notes.');
 $assert(str_contains($query, '$this->cipher->decrypt('), 'Authorized managers cannot authenticate and read encrypted case notes.');
+$assert(str_contains($query, 'SELECT automatic_promotion_enabled,minimum_risk'), 'The direct Security Center policy snapshot omits the explicit promotion flag.');
+$assert(str_contains($query, "'automatic_promotion_enabled' => (bool) \$row['automatic_promotion_enabled']"), 'The direct Security Center policy snapshot infers opt-in from row existence.');
 $assert(str_contains($query, 'recentResponseActions'), 'The Security Center omits immutable response history.');
 $assert(str_contains($overview, 'SecurityAlertPreferenceService'), 'The Security Center overview does not return explicit policy state.');
 
 $assert(str_contains($endpoint, "ControlCenterEndpoint::requireMethod('POST')"), 'Security response endpoint is not POST-only.');
 $assert(str_contains($endpoint, "['customer_owner', 'customer_admin', 'support_member']"), 'Security response endpoint does not preserve responder role routing.');
 $assert(str_contains($endpoint, 'ControlCenterEndpoint::requestId'), 'Security response mutations do not require request identities.');
+$assert(str_contains($endpoint, "'assigned' => \$response->assignCase("), 'The assignment endpoint hides exact-replay state.');
 $assert(str_contains($endpoint, 'AuthEndpoint::ip()'), 'Reauthentication is not bound to the current client network identity.');
 $assert(str_contains($endpoint, 'AuthEndpoint::userAgent()'), 'Reauthentication is not bound to the current user agent.');
 foreach (['save_alert_preferences', 'begin_case_resolution_reauthentication', 'complete_case_resolution_reauthentication', 'resolve_case'] as $action) {
     $assert(str_contains($endpoint, "case '" . $action . "':"), 'Security response endpoint is missing ' . $action . '.');
 }
 $assert(str_contains($endpoint, 'routeEmergencyAction'), 'Emergency response does not invoke alert routing.');
+
+$assert(str_contains($assignmentProof, 'security_response_request_conflict'), 'Native assignment proof omits conflicting responder request-ID reuse.');
+$assert(str_contains($assignmentProof, 'security_case_resolved'), 'Native assignment proof omits resolved-case rejection.');
+$assert(str_contains($assignmentProof, 'Assignment replay created duplicate immutable receipts.'), 'Native assignment proof omits duplicate-receipt detection.');
 
 $assert(str_contains($page, 'Security Cases &amp; Responders'), 'Security Center omits the case and responder surface.');
 $assert(str_contains($page, 'Security Alert Policy'), 'Security Center omits policy controls.');
