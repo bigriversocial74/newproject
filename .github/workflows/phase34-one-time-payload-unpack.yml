@@ -32,7 +32,7 @@ jobs:
             .phase34-payload/chunk-07b \
             .phase34-payload/chunk-08 \
             | base64 -d > /tmp/phase34-payload.tgz
-          echo "9fe13978006e393bbb034d8ce9d5fd53fa120750216b8ddd59d19fe3a5c05efd  /tmp/phase34-payload.tgz" | sha256sum -c -
+          echo "da707d9bc91c5187186935366ef45f29b49b8a3cf219616e8c459ee549e2492f  /tmp/phase34-payload.tgz" | sha256sum -c -
           tar -xzf /tmp/phase34-payload.tgz
           rm -rf .phase34-payload .github/workflows/phase34-one-time-payload-unpack.yml
           git config user.name "vp3-certification-bot"
