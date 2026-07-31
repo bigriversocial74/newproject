@@ -18,7 +18,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Detect remaining payload
+        id: payload
+        run: |
+          if [ -f .phase34-payload/chunk-00 ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Verify and unpack Phase 34 payload
+        if: steps.payload.outputs.present == 'true'
         run: |
           cat \
             .phase34-payload/chunk-00 \
@@ -34,9 +43,14 @@ jobs:
             | base64 -d > /tmp/phase34-payload.tgz
           echo "da707d9bc91c5187186935366ef45f29b49b8a3cf219616e8c459ee549e2492f  /tmp/phase34-payload.tgz" | sha256sum -c -
           tar -xzf /tmp/phase34-payload.tgz
-          rm -rf .phase34-payload .github/workflows/phase34-one-time-payload-unpack.yml
+          git restore --source=HEAD -- .github/workflows
+          rm -rf .phase34-payload
           git config user.name "vp3-certification-bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
+          git reset -- .github/workflows
+          if git diff --cached --quiet; then
+            exit 0
+          fi
           git commit -m "Build Phase 34 release deployment control center"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
