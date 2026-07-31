@@ -1,118 +1,18 @@
-name: Phase 15 Federated Settings
+name: Legacy VP3 Phase Workflow (Manual Only)
 
 on:
-  push:
-    branches:
-      - feature/phase-15-federated-settings-shared-control-center
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: phase15-vp3-${{ github.workflow }}-${{ github.sha }}
-  cancel-in-progress: false
+  group: vp3-legacy-manual-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  php:
+  retired:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.2', '8.3']
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Validate PHP and JavaScript syntax
-        run: |
-          find src public tests config workers -name '*.php' -print0 | xargs -0 -n1 php -l
-          node --check public/assets/federated-settings.js
-      - name: Run retained and Phase 15 contracts
-        run: |
-          php tests/run.php
-          php tests/phase12_homeserver_control_plane_contract.php
-          php tests/phase13_homeserver_cutover_contract.php
-          php tests/phase14_homeserver_fleet_contract.php
-          php tests/phase15_federated_settings_contract.php
-
-  mysql8:
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: vp3_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Install MySQL client
-        run: sudo apt-get update && sudo apt-get install -y mysql-client
-      - name: Import cumulative installer twice
-        working-directory: database
-        run: |
-          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
-          mysql -h 127.0.0.1 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained and Phase 15 database certification
-        env:
-          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3306;dbname=vp3_test;charset=utf8mb4
-          VP3_TEST_DB_USER: root
-          VP3_TEST_DB_PASSWORD: root
-        run: |
-          php tests/phase12_homeserver_control_plane_database_integration.php
-          php tests/phase14_homeserver_fleet_database_integration.php
-          php tests/phase15_federated_settings_database_integration.php
-
-  mariadb1011:
-    runs-on: ubuntu-latest
-    services:
-      mariadb:
-        image: mariadb:10.11
-        env:
-          MARIADB_ROOT_PASSWORD: root
-          MARIADB_DATABASE: vp3_test
-        ports:
-          - 3307:3306
-        options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: pdo_mysql, json, mbstring, openssl, sodium, zip
-          coverage: none
-      - name: Install MariaDB client
-        run: sudo apt-get update && sudo apt-get install -y mariadb-client
-      - name: Import cumulative installer twice
-        working-directory: database
-        run: |
-          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
-          mariadb -h 127.0.0.1 -P 3307 -uroot -proot vp3_test < vp3-single-install.sql
-      - name: Run retained and Phase 15 database certification
-        env:
-          VP3_TEST_DSN: mysql:host=127.0.0.1;port=3307;dbname=vp3_test;charset=utf8mb4
-          VP3_TEST_DB_USER: root
-          VP3_TEST_DB_PASSWORD: root
-        run: |
-          php tests/phase12_homeserver_control_plane_database_integration.php
-          php tests/phase14_homeserver_fleet_database_integration.php
-          php tests/phase15_federated_settings_database_integration.php
+      - name: Retired workflow notice
+        run: echo "This historical workflow is manual-only. Use VP3 Retained Certification for current final regression testing."
