@@ -133,3 +133,33 @@ jobs:
           php tests/phase32_assignment_replay_database_integration.php
           php tests/phase33_production_deployment_database_integration.php
           php tests/phase33_operator_controls_database_integration.php
+
+  repair-contract-literal:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Repair literal source assertion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/phase33_operator_controls_contract.php')
+          text = path.read_text()
+          old = '$assert(str_contains($bootstrapCli, "array_key_exists(\'password\', $options)"), \'Owner bootstrap CLI does not reject command-line passwords.\');'
+          new = '$assert(str_contains($bootstrapCli, \'array_key_exists(\\\'password\\\', $options)\'), \'Owner bootstrap CLI does not reject command-line passwords.\');'
+          if old in text:
+              path.write_text(text.replace(old, new, 1))
+          PY
+          if git diff --quiet -- tests/phase33_operator_controls_contract.php; then
+            echo "Contract literal is already repaired."
+            exit 0
+          fi
+          git config user.name "vp3-certification-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add tests/phase33_operator_controls_contract.php
+          git commit -m "Fix Phase 33 owner bootstrap literal contract"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
