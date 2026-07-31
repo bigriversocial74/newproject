@@ -36,6 +36,7 @@ final class SecurityIncidentAutomationService
              INNER JOIN security_alert_preferences p ON p.account_scope=e.account_scope
              LEFT JOIN security_incident_cases c ON c.source_audit_event_id=e.id
              WHERE c.id IS NULL
+               AND p.automatic_promotion_enabled=1
                AND (
                  (CASE e.risk_level WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END)
                    >= (CASE p.minimum_risk WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END)
@@ -106,12 +107,12 @@ final class SecurityIncidentAutomationService
             }
 
             $preference = $pdo->prepare(
-                'SELECT minimum_risk,include_integrity_failures,notify_on_promotion
+                'SELECT automatic_promotion_enabled,minimum_risk,include_integrity_failures,notify_on_promotion
                  FROM security_alert_preferences WHERE account_scope=:account LIMIT 1 FOR UPDATE'
             );
             $preference->execute(['account' => (int) $event['account_scope']]);
             $policy = $preference->fetch(PDO::FETCH_ASSOC);
-            if (!is_array($policy) || !$this->qualifies($event, $policy)) {
+            if (!is_array($policy) || !(bool) $policy['automatic_promotion_enabled'] || !$this->qualifies($event, $policy)) {
                 return ['outcome' => 'ignored'];
             }
 
