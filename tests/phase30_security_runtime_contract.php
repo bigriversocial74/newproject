@@ -16,6 +16,22 @@ $reauth = (string) file_get_contents($root . '/src/Security/SecurityReauthentica
 $rateLimit = (string) file_get_contents($root . '/src/Security/SecurityRateLimitService.php');
 $migration = (string) file_get_contents($root . '/database/migrations/20260730_phase30_security_audit_hardening.sql');
 $legacyPhase29 = (string) file_get_contents($root . '/.github/workflows/phase29-browser-request-integrity.yml');
+$overviewEndpoint = (string) file_get_contents($root . '/public/api/control-center/v1/security-audit-overview.php');
+$exportEndpoint = (string) file_get_contents($root . '/public/api/control-center/v1/security-audit-export.php');
+
+$builder = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/tools/build-single-install.php');
+$firstOutput = [];
+$firstStatus = 0;
+exec($builder . ' 2>&1', $firstOutput, $firstStatus);
+$firstInstaller = (string) file_get_contents($root . '/database/vp3-single-install.sql');
+$secondOutput = [];
+$secondStatus = 0;
+exec($builder . ' 2>&1', $secondOutput, $secondStatus);
+$secondInstaller = (string) file_get_contents($root . '/database/vp3-single-install.sql');
+$assert($firstStatus === 0 && $secondStatus === 0, 'The standalone installer did not build successfully twice.');
+$assert($firstInstaller !== '' && hash_equals(hash('sha256', $firstInstaller), hash('sha256', $secondInstaller)), 'The standalone installer is not byte-for-byte reproducible.');
+$assert($firstInstaller === $secondInstaller, 'Repeated standalone installer builds produced different bytes.');
+$assert(preg_match('/^-- Ordered migration source SHA-256: [a-f0-9]{64}$/m', $secondInstaller) === 1, 'The standalone installer lacks a deterministic source identity.');
 
 $assert(str_contains($query, "'customer_owner'") && str_contains($query, "'customer_admin'"), 'Full account audit access omits customer owner or admin roles.');
 $assert(str_contains($query, "category=:visible_category OR actor_id=:visible_actor"), 'Billing audit visibility is not restricted to billing events or the current actor.');
@@ -38,6 +54,12 @@ $assert(str_contains($rateLimit, 'FOR UPDATE'), 'Rate-limit bucket mutation is n
 $assert(str_contains($rateLimit, 'blocked_until') && str_contains($rateLimit, 'retry_after'), 'Rate-limit enforcement does not persist and return blocking state.');
 $assert(str_contains($rateLimit, "hash('sha256', $scopeType . '|' . $actionType . '|' . $scopeKey)"), 'Rate-limit scope keys are not privacy hashed.');
 
+foreach ([$overviewEndpoint, $exportEndpoint] as $endpoint) {
+    $assert(str_contains($endpoint, "ControlCenterEndpoint::requireMethod('POST')"), 'A Phase 30 endpoint bypasses the browser request-integrity boundary.');
+    $assert(str_contains($endpoint, 'ControlCenterEndpoint::accountContextForRoles('), 'A Phase 30 endpoint bypasses account-role authorization.');
+}
+$assert(str_contains($exportEndpoint, "['customer_owner', 'customer_admin']"), 'Security audit export is not restricted to account owners and admins.');
+
 $assert(str_contains($legacyPhase29, 'workflow_dispatch:'), 'The superseded Phase 29 workflow is not manual-only.');
 $assert(!str_contains($legacyPhase29, "on:\n  pull_request:"), 'The superseded Phase 29 workflow still fans out on pull requests.');
 
@@ -46,4 +68,4 @@ if ($failures !== []) {
     exit(1);
 }
 
-fwrite(STDOUT, "Phase 30 security query, export, reauthentication and rate-limit contract passed.\n");
+fwrite(STDOUT, "Phase 30 security query, export, reauthentication, rate-limit and deterministic-installer contract passed.\n");
