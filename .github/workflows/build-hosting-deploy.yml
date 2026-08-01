@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - build/vp3-hosting-deploy-f9084697
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -70,16 +73,13 @@ jobs:
           <IfModule mod_rewrite.c>
           RewriteEngine On
 
-          # Never expose protected application directories.
           RewriteRule ^(?:config|database|docs|src|tests|tools|vendor|workers|var)(?:/|$) - [R=404,L,NC]
           RewriteRule ^\. - [R=404,L]
 
-          # Serve real root entrypoints and other intentional root files.
           RewriteCond %{REQUEST_FILENAME} -f [OR]
           RewriteCond %{REQUEST_FILENAME} -d
           RewriteRule ^ - [L]
 
-          # Route all public application URLs into the certified public webroot.
           RewriteRule ^(.+)$ public/$1 [L,QSA]
           </IfModule>
 
