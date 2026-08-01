@@ -1,0 +1,158 @@
+name: Build VP3 Hosting Deploy ZIP
+
+on:
+  push:
+    branches:
+      - build/vp3-hosting-deploy-f9084697
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out certified source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, openssl, sodium, zip
+          tools: composer:v2
+
+      - name: Install production autoloader
+        run: composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress
+
+      - name: Assemble hosting deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_NAME="vp3-hosting-deploy-f9084697"
+          STAGE="$RUNNER_TEMP/$PACKAGE_NAME"
+          OUTPUT="$RUNNER_TEMP/$PACKAGE_NAME.zip"
+
+          rm -rf "$STAGE" "$OUTPUT"
+          mkdir -p "$STAGE"
+
+          rsync -a ./ "$STAGE/" \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='tests/' \
+            --exclude='config/config.php' \
+            --exclude='config/config-generated-secrets.php' \
+            --exclude='config/.config-generated-secrets.php.*.tmp'
+
+          mkdir -p "$STAGE/var/cache" "$STAGE/var/log"
+
+          cat > "$STAGE/index.php" <<'PHP'
+          <?php
+
+          declare(strict_types=1);
+
+          require __DIR__ . '/public/index.php';
+          PHP
+
+          cat > "$STAGE/setup.php" <<'PHP'
+          <?php
+
+          declare(strict_types=1);
+
+          require __DIR__ . '/public/setup.php';
+          PHP
+
+          cat > "$STAGE/.htaccess" <<'HTACCESS'
+          Options -Indexes
+          DirectoryIndex index.php
+
+          <IfModule mod_rewrite.c>
+          RewriteEngine On
+
+          # Never expose protected application directories.
+          RewriteRule ^(?:config|database|docs|src|tests|tools|vendor|workers|var)(?:/|$) - [R=404,L,NC]
+          RewriteRule ^\. - [R=404,L]
+
+          # Serve real root entrypoints and other intentional root files.
+          RewriteCond %{REQUEST_FILENAME} -f [OR]
+          RewriteCond %{REQUEST_FILENAME} -d
+          RewriteRule ^ - [L]
+
+          # Route all public application URLs into the certified public webroot.
+          RewriteRule ^(.+)$ public/$1 [L,QSA]
+          </IfModule>
+
+          <FilesMatch "(?:^\.|\.(?:sql|md|lock|json|ya?ml|ini|log))$">
+            <IfModule mod_authz_core.c>
+              Require all denied
+            </IfModule>
+            <IfModule !mod_authz_core.c>
+              Order allow,deny
+              Deny from all
+            </IfModule>
+          </FilesMatch>
+          HTACCESS
+
+          cp "$STAGE/database/vp3-single-install.sql" "$STAGE/vp3-single-install.sql"
+
+          cat > "$STAGE/DEPLOY-README.txt" <<'README'
+          VP3 HOSTING DEPLOYMENT
+          ======================
+
+          Certified source merge commit:
+          f9084697b39759ae1cafe56849dc3549044b18ee
+
+          INSTALLATION
+          1. Extract this ZIP directly into the website document root.
+          2. Rename config/config-example-browser.php to config/config.php.
+          3. Edit only the domain and database values in config/config.php.
+          4. Create an empty MySQL 8 or MariaDB 10.11 database.
+          5. Import vp3-single-install.sql with phpMyAdmin.
+          6. Open https://YOUR-DOMAIN/setup.php.
+          7. Create the first administrator.
+
+          IMPORTANT
+          - The encryption secret is generated automatically.
+          - Preserve config/config.php and config/config-generated-secrets.php during future deployments.
+          - Do not reimport the standalone SQL file into an existing installation.
+          - This package includes root index.php and setup.php entrypoints and Apache routing for public assets and APIs.
+          README
+
+          php -l "$STAGE/index.php"
+          php -l "$STAGE/setup.php"
+          php -l "$STAGE/public/setup.php"
+          php -l "$STAGE/public/setup-first-user.php"
+
+          test -f "$STAGE/vendor/autoload.php"
+          test -f "$STAGE/config/config-example-browser.php"
+          test -f "$STAGE/database/vp3-single-install.sql"
+          test -f "$STAGE/vp3-single-install.sql"
+          test -d "$STAGE/src"
+          test -d "$STAGE/public"
+
+          find "$STAGE" -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
+
+          (
+            cd "$STAGE"
+            zip -q -r "$OUTPUT" .
+          )
+
+          unzip -t "$OUTPUT"
+          unzip -l "$OUTPUT" | grep -q ' setup.php$'
+          unzip -l "$OUTPUT" | grep -q ' public/setup.php$'
+          unzip -l "$OUTPUT" | grep -q ' config/config-example-browser.php$'
+          unzip -l "$OUTPUT" | grep -q ' vp3-single-install.sql$'
+          unzip -l "$OUTPUT" | grep -q ' vendor/autoload.php$'
+
+          sha256sum "$OUTPUT" | tee "$RUNNER_TEMP/$PACKAGE_NAME.sha256"
+
+      - name: Upload hosting deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: vp3-hosting-deploy-f9084697
+          path: |
+            ${{ runner.temp }}/vp3-hosting-deploy-f9084697.zip
+            ${{ runner.temp }}/vp3-hosting-deploy-f9084697.sha256
+          if-no-files-found: error
+          retention-days: 30
